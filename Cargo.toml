@@ -6,3 +6,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+sdl2 = "0.35.2"
+gl = "0.14.0"
+nalgebra-glm = "0.18.0"
+
+# genration
+noise = "0.8.2"
+
+# for texture atlas
+lodepng = "3.8"
+rgb = "0.8.36"
