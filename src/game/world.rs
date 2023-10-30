@@ -9,11 +9,10 @@ pub struct World {
 }
 
 impl World {
-
     //TODO:
     //This generation is temporary, need in future change to normal generation!
     pub fn new(seed: u32, blocksize: f32) -> Self {
-        let offset = blocksize * 16.0;
+        let offset = blocksize * Chunk::WIDTH as f32;
         let mut chunks = vec![vec![]; 3];
         for x in 0..3 {
             for z in 0..3 {
@@ -34,6 +33,11 @@ impl World {
     }
 }
 
+/// Block data stores as 3D array by yxz (height, x and z offset) and their u64 looks like:
+/// 48 bits - metatdata information
+/// 16 bits - block id
+type ChunkBlocks = [[[u64; Chunk::WIDTH]; Chunk::WIDTH]; Chunk::HEIGHT];
+
 pub struct Chunk {
     xoffset: f32,
     zoffset: f32,
@@ -41,15 +45,15 @@ pub struct Chunk {
     /// Block data stores as 3D array by yxz (height, x and z offset) and their u64 looks like:
     /// 48 bits - metatdata information
     /// 16 bits - block id
-    blocks: [[[u64; Chunk::WIDTH]; Chunk::WIDTH]; Chunk::HEIGHT],
+    blocks: ChunkBlocks,
 }
 
 use nalgebra_glm::Vec3;
 use noise::*;
 
 impl Chunk {
-    const WIDTH: usize = 16;
-    const HEIGHT: usize = 216;
+    pub const WIDTH: usize = 16;
+    pub const HEIGHT: usize = 216;
 
     const SURFACE_LINE: usize = 100;
 
@@ -58,30 +62,17 @@ impl Chunk {
     pub fn create(seed: u32, xoffset: f32, zoffset: f32) -> Self {
         let mut blocks = [[[0; Self::WIDTH]; Self::WIDTH]; Self::HEIGHT];
 
-        for y in 0..Self::SURFACE_LINE {
-            let floor = &mut blocks[y];
-
-            for x in 0..Self::WIDTH {
-                for z in 0..Self::WIDTH {
-                    floor[x][z] = 1;
-                }
-            }
-        }
-
         let perlin = noise::Perlin::new(seed);
         let xoffset_f64 = xoffset as f64;
-        let yoffset_f64 = zoffset as f64;
-        for y in Self::SURFACE_LINE..Self::HEIGHT {
+        let zoffset_f64 = zoffset as f64;
+        for y in 0..Self::HEIGHT {
             let floor = &mut blocks[y];
 
             for x in 0..Self::WIDTH {
                 for z in 0..Self::WIDTH {
-                    let val = perlin.get([xoffset_f64 + x as f64, yoffset_f64 + z as f64]);
-                    if val < 0.5 {
-                        floor[x][z] = 1;
-                    } else {
-                        floor[x][z] = 0;
-                    }
+                    let val = perlin.get([xoffset_f64 + x as f64, zoffset_f64 + z as f64]);
+                    let surface_height = (Self::SURFACE_LINE as f64 * (20.0 * val)) as usize;
+                    floor[x][z] = if y < surface_height { 1 } else { 0 }
                 }
             }
         }
@@ -91,6 +82,18 @@ impl Chunk {
             zoffset,
             blocks,
         }
+    }
+
+    pub fn xoffset(&self) -> f32 {
+        self.xoffset
+    }
+
+    pub fn zoffset(&self) -> f32 {
+        self.zoffset
+    }
+
+    pub fn blocks(&self) -> &ChunkBlocks {
+        &self.blocks
     }
 }
 

@@ -7,6 +7,8 @@ use window::*;
 pub mod game;
 use game::*;
 
+mod render;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let window = Window::from("Terraria 3D", Window::WIDTH, Window::HEIGHT)?;
     let mut events = window.event_pump()?;
