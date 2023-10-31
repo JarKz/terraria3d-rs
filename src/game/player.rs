@@ -38,7 +38,9 @@ impl Player {
     pub fn new(aspect: f32, fovy: f32, near: f32, far: f32) -> Self {
         Player {
             projection: perspective(aspect, fovy, near, far),
-            position: vec3(0.0, 0.0, 0.0),
+            //TODO:
+            //CHANGE IT IN FUTURE TO NORMAL POSITION
+            position: vec3(10.0, 0.0, 10.0),
             target: vec3(0.0, 0.0, -1.0),
             up: vec3(0.0, 1.0, 0.0),
             pitch: Self::DEFAULT_PITCH,

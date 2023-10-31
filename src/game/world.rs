@@ -1,4 +1,7 @@
-#[allow(dead_code)]
+#![allow(dead_code)]
+
+use crate::render::{Program, Shader, TextureAtlas, TextureAtlasConfiguration};
+
 pub struct World {
     seed: u32,
     blocksize: f32,
@@ -6,6 +9,8 @@ pub struct World {
     //TODO:
     //this is temporary, need in future to save in file as bytes
     chunks: Vec<Vec<Chunk>>,
+    texture_atlas: TextureAtlas,
+    shader_program: Program,
 }
 
 impl World {
@@ -19,17 +24,35 @@ impl World {
                 chunks[x].push(Chunk::create(seed, x as f32 * offset, z as f32 * offset));
             }
         }
+        let vshader = Shader::from_vertex(String::from("../res/shaders/block-vert.glsl")).unwrap();
+        let fshader =
+            Shader::from_fragment(String::from("../res/shaders/block-frag.glsl")).unwrap();
         Self {
             seed,
             blocksize,
             chunks,
+            texture_atlas: TextureAtlas::from(TextureAtlasConfiguration {
+                image_path: String::from("../res/images/block-texture-atlas.png"),
+                square_size: 16,
+            }),
+            shader_program: Program::from([vshader, fshader]),
         }
     }
 
-    pub fn update_shaders(&self, _player_position: &Vec3) {
+    pub fn update_shaders(&mut self, _player_position: &Vec3) {
         //TODO:
         //Need add defining direction from player position to chunks for generating only these
         //vertices which need to display.
+    }
+
+    pub fn render(&self, projection: &Mat4, view: &Mat4) {
+        // for mesh in &self.chunk_meshs {
+        //     mesh.render(projection, view);
+        // }
+        self.texture_atlas.set_used();
+        self.shader_program.set_used();
+        self.shader_program.insert_mat4(&std::ffi::CString::new("projection").unwrap(), projection);
+        self.shader_program.insert_mat4(&std::ffi::CString::new("view").unwrap(), view);
     }
 }
 
@@ -48,7 +71,7 @@ pub struct Chunk {
     blocks: ChunkBlocks,
 }
 
-use nalgebra_glm::Vec3;
+use nalgebra_glm::{Mat4, Vec3};
 use noise::*;
 
 impl Chunk {

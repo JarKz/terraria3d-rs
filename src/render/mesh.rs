@@ -1,10 +1,10 @@
 use super::block::*;
-use crate::game::world::Chunk;
+// use crate::game::world::Chunk;
 
 use gl::types::*;
 use nalgebra_glm::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RenderPosition {
     /// Negative Z
     NORTH = 0,
@@ -20,136 +20,24 @@ pub enum RenderPosition {
     BOTTOM = 5,
 }
 
-pub struct ChunkMesh<'a> {
+pub struct ChunkMesh {
     mesh: Vec<BlockFace>,
-    chunk: &'a Chunk,
+    // chunk: &'a Chunk,
     blocksize: f32,
+    shader_program: super::Program,
 }
 
-impl ChunkMesh<'_> {
-    pub fn update_vertices(&mut self, positions: [RenderPosition; 2], player_y: f32) {
-        let blocks = self.chunk.blocks();
-        for y in 0..Chunk::HEIGHT {
-            self.update_floor(y, &blocks[y], &positions, player_y);
-        }
-    }
 
-    fn update_floor(
-        &mut self,
-        y: usize,
-        floor: &[[u64; Chunk::WIDTH]; Chunk::WIDTH],
-        positions: &[RenderPosition; 2],
-        player_y: f32,
-    ) {
-        for pos in positions {
-            match pos {
-                RenderPosition::NORTH => {
-                    let z = 0;
-                    for x in 0..Chunk::WIDTH {
-                        self.update_block_faces(x, y, z, floor, positions, player_y)
-                    }
-                }
-                RenderPosition::SOUTH => {
-                    let z = Chunk::WIDTH;
-                    for x in 0..Chunk::WIDTH {
-                        self.update_block_faces(x, y, z, floor, positions, player_y)
-                    }
-                }
-                RenderPosition::WEST => {
-                    let x = 0;
-                    for z in 0..Chunk::WIDTH {
-                        self.update_block_faces(x, y, z, floor, positions, player_y)
-                    }
-                }
-                RenderPosition::EAST => {
-                    let x = Chunk::WIDTH;
-                    for z in 0..Chunk::WIDTH {
-                        self.update_block_faces(x, y, z, floor, positions, player_y)
-                    }
-                }
-                _ => (),
-            }
-        }
-    }
-
-    fn update_block_faces(
-        &mut self,
-        x: usize,
-        y: usize,
-        z: usize,
-        floor: &[[u64; Chunk::WIDTH]; Chunk::WIDTH],
-        positions: &[RenderPosition; 2],
-        player_y: f32,
-    ) {
-        if Self::is_air(floor[x][z]) {
-            for pos in positions {
-                match pos {
-                    RenderPosition::NORTH => {
-                        if z != 0 {
-                            self.update_block_faces(x, y, z - 1, floor, positions, player_y)
-                        }
-                    }
-                    RenderPosition::SOUTH => {
-                        if z != Chunk::WIDTH {
-                            self.update_block_faces(x, y, z + 1, floor, positions, player_y)
-                        }
-                    }
-                    RenderPosition::WEST => {
-                        if x != 0 {
-                            self.update_block_faces(x - 1, y, z, floor, positions, player_y)
-                        }
-                    }
-                    RenderPosition::EAST => {
-                        if x != Chunk::WIDTH {
-                            self.update_block_faces(x + 1, y, z, floor, positions, player_y)
-                        }
-                    }
-                    _ => (),
-                }
-            }
-        } else {
-            let xoffset = self.chunk.xoffset();
-            let zoffset = self.chunk.zoffset();
-            for pos in positions {
-                self.mesh.push(BlockFace::new(
-                    floor[x][z],
-                    xoffset,
-                    zoffset,
-                    y as f32,
-                    self.blocksize,
-                    pos,
-                ));
-            }
-            let real_player_y = player_y / self.blocksize;
-            if real_player_y < y as f32
-                && (y == 0 || !Self::is_air(self.chunk.blocks()[y - 1][x][z]))
-            {
-                self.mesh.push(BlockFace::new(
-                    floor[x][z],
-                    xoffset,
-                    zoffset,
-                    y as f32,
-                    self.blocksize,
-                    &RenderPosition::BOTTOM,
-                ));
-            }
-            if real_player_y > y as f32
-                && (y == Chunk::HEIGHT || !Self::is_air(self.chunk.blocks()[y + 1][x][z]))
-            {
-                self.mesh.push(BlockFace::new(
-                    floor[x][z],
-                    xoffset,
-                    zoffset,
-                    y as f32,
-                    self.blocksize,
-                    &RenderPosition::TOP,
-                ));
-            }
-        }
-    }
-
+impl ChunkMesh {
     fn is_air(block: u64) -> bool {
         (block & 1) == 0
+    }
+
+    pub fn render(&self, shader_program: &super::Program) {
+        for block_face in &self.mesh {
+            shader_program.insert_mat4(&std::ffi::CString::new("model").unwrap(), &block_face.model);
+            block_face.render();
+        }
     }
 }
 
@@ -216,13 +104,14 @@ impl BlockFace {
     const MAPPING_VERTEX_INDICES: [usize; 6] = [0, 1, 2, 1, 2, 3];
     const TEXTURE_UV: [[f32; 2]; 4] = [[0., 0.], [0., 1.], [1., 0.], [1., 1.]];
 
+    const STRIDE: usize = 8;
     const STANDARD_VAO_ATTRIBS: [VaoAttributes; 3] = [
         VaoAttributes {
             position: 0,
             size: 3,
             type_: gl::FLOAT,
             normalized: gl::FALSE,
-            stride: (8 * std::mem::size_of::<f32>()) as GLint,
+            stride: (Self::STRIDE * std::mem::size_of::<f32>()) as GLint,
             pointer: std::ptr::null(),
         },
         VaoAttributes {
@@ -230,7 +119,7 @@ impl BlockFace {
             size: 3,
             type_: gl::FLOAT,
             normalized: gl::FALSE,
-            stride: (8 * std::mem::size_of::<f32>()) as GLint,
+            stride: (Self::STRIDE * std::mem::size_of::<f32>()) as GLint,
             pointer: (3 * std::mem::size_of::<f32>()) as *const GLvoid,
         },
         VaoAttributes {
@@ -238,19 +127,12 @@ impl BlockFace {
             size: 2,
             type_: gl::FLOAT,
             normalized: gl::FALSE,
-            stride: (8 * std::mem::size_of::<f32>()) as GLint,
+            stride: (Self::STRIDE * std::mem::size_of::<f32>()) as GLint,
             pointer: (6 * std::mem::size_of::<f32>()) as *const GLvoid,
         },
     ];
 
-    fn new(
-        block: u64,
-        xoffset: f32,
-        zoffset: f32,
-        yoffset: f32,
-        blocksize: f32,
-        pos: &RenderPosition,
-    ) -> Self {
+    fn new(block: u64, offset: Vec3, pos: &RenderPosition) -> Self {
         let block_info = Block::from(Self::get_block_id(block));
 
         let mut data = vec![];
@@ -266,10 +148,7 @@ impl BlockFace {
         let vbo = Self::create_vbo(data, gl::STATIC_DRAW);
         let ebo = Self::create_ebo(gl::STATIC_DRAW);
         let vao = Self::create_vao(vbo, ebo);
-        let model = translate(
-            &Mat4::identity(),
-            &(vec3(xoffset, yoffset, zoffset) * blocksize),
-        );
+        let model = translate(&Mat4::identity(), &offset);
 
         Self {
             vbo,
@@ -355,6 +234,13 @@ impl BlockFace {
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, 0);
         }
         vao
+    }
+
+    fn render(&self) {
+        unsafe {
+            gl::BindVertexArray(self.vao);
+            gl::DrawElements(gl::TRIANGLES, 4, gl::FLOAT, 0 as *const GLvoid);
+        }
     }
 }
 

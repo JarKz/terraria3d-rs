@@ -74,12 +74,12 @@ impl Game {
 
     pub fn update(&mut self) {
         let current = self.timer.ticks();
-        let delta_timer = (self.last_frame - self.timer.ticks()) as f32;
+        let delta_timer = (self.timer.ticks() - self.last_frame) as f32;
 
         self.player.process_move(delta_timer);
 
-        //TODO: this function call have no affect!
         self.world.update_shaders(self.player.position());
+        self.world.render(self.player.projection(), &self.player.look_at());
 
         self.last_frame = current;
     }

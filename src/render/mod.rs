@@ -102,12 +102,18 @@ impl TextureAtlas {
             gl::BindTexture(gl::TEXTURE_2D_ARRAY, 0);
         }
     }
+
+    pub fn set_used(&self) {
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D_ARRAY, self.id);
+        }
+    }
 }
 
 impl From<TextureAtlasConfiguration> for TextureAtlas {
     fn from(cfg: TextureAtlasConfiguration) -> Self {
         let image =
-            lodepng::decode32_file(cfg.image_path).expect("Image not found in resource path!");
+            lodepng::decode32_file(std::path::Path::new(&cfg.image_path)).expect("Image not found in resource path!");
         let images = Self::get_atlas_mesh_from_image(image, cfg.square_size);
         let mut id = 0;
         Self::create_texture_image(&mut id, images, cfg.square_size as i32);
@@ -129,6 +135,16 @@ pub struct Program {
 impl Program {
     pub fn set_used(&self) {
         unsafe { gl::UseProgram(self.id) }
+    }
+
+    pub fn insert_mat4(&self, fieldname: &CString, matrix: &nalgebra_glm::Mat4) {
+        unsafe {
+            gl::Uniform4fv(
+                gl::GetUniformLocation(self.id, fieldname.as_ptr() as *const GLchar),
+                1,
+                matrix.as_ptr(),
+            );
+        }
     }
 }
 
@@ -227,7 +243,9 @@ impl Shader {
         let file = std::fs::File::open(path)?;
         let reader = BufReader::new(file);
         Ok(CString::new(
-            reader.lines().reduce(|l, r| Ok(l? + &r?)).unwrap()?,
+            reader.lines().reduce(|l, r| {
+                Ok(l? + "\n" + &r?)
+            }).unwrap()?,
         )?)
     }
 }
