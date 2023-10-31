@@ -1,5 +1,5 @@
 use super::block::*;
-// use crate::game::world::Chunk;
+use crate::game::world::{Chunk, ChunkBlocks};
 
 use gl::types::*;
 use nalgebra_glm::*;
@@ -20,37 +20,82 @@ pub enum RenderPosition {
     BOTTOM = 5,
 }
 
+#[derive(Clone)]
 pub struct ChunkMesh {
     mesh: Vec<BlockFace>,
     // chunk: &'a Chunk,
     blocksize: f32,
-    shader_program: super::Program,
 }
 
-
 impl ChunkMesh {
+    pub fn new(blocks: &ChunkBlocks, xoffset: f32, zoffset: f32, blocksize: f32) -> Self {
+        let mut mesh = vec![];
+        let mut offset = vec3(xoffset, 0., zoffset);
+        for y in 0..Chunk::HEIGHT {
+            offset = vec3(xoffset, offset.y, zoffset);
+            for x in 0..Chunk::WIDTH {
+                for z in 0..Chunk::WIDTH {
+                    if Self::is_air(blocks[y][x][z]) {
+                        continue;
+                    }
+
+                    let mut positions = vec![];
+                    if x == 0 || Self::is_air(blocks[y][x - 1][z]) {
+                        positions.push(RenderPosition::WEST);
+                    }
+                    if x + 1 == Chunk::WIDTH || Self::is_air(blocks[y][x + 1][z]) {
+                        positions.push(RenderPosition::EAST);
+                    }
+                    if z == 0 || Self::is_air(blocks[y][x][z - 1]) {
+                        positions.push(RenderPosition::NORTH);
+                    }
+                    if z + 1 == Chunk::WIDTH || Self::is_air(blocks[y][x][z + 1]) {
+                        positions.push(RenderPosition::SOUTH);
+                    }
+                    if y == 0 || Self::is_air(blocks[y - 1][x][z]) {
+                        positions.push(RenderPosition::BOTTOM);
+                    }
+                    if y + 1 == Chunk::HEIGHT || Self::is_air(blocks[y + 1][x][z]) {
+                        positions.push(RenderPosition::TOP);
+                    }
+
+                    for pos in &positions {
+                        mesh.push(BlockFace::new(blocks[y][x][z], offset, pos))
+                    }
+                    offset.z += blocksize;
+                }
+                offset.x += blocksize;
+            }
+            offset.y += blocksize;
+        }
+        Self { mesh, blocksize }
+    }
+
     fn is_air(block: u64) -> bool {
         (block & 1) == 0
     }
 
     pub fn render(&self, shader_program: &super::Program) {
+        println!("{}", self.mesh.len());
         for block_face in &self.mesh {
-            shader_program.insert_mat4(&std::ffi::CString::new("model").unwrap(), &block_face.model);
+            shader_program
+                .insert_mat4(&std::ffi::CString::new("model").unwrap(), &block_face.model);
             block_face.render();
         }
     }
 }
 
-pub struct VaoAttributes {
-    pub position: GLuint,
-    pub size: GLint,
-    pub type_: GLenum,
-    pub normalized: GLboolean,
-    pub stride: GLsizei,
-    pub pointer: *const GLvoid,
+struct VaoAttributes {
+    position: GLuint,
+    size: GLint,
+    type_: GLenum,
+    normalized: GLboolean,
+    stride: GLsizei,
+    pointer: *const GLvoid,
 }
 
-struct BlockFace {
+#[derive(Clone)]
+pub struct BlockFace {
     vbo: GLuint,
     vao: GLuint,
     ebo: GLuint,
@@ -132,7 +177,7 @@ impl BlockFace {
         },
     ];
 
-    fn new(block: u64, offset: Vec3, pos: &RenderPosition) -> Self {
+    pub fn new(block: u64, offset: Vec3, pos: &RenderPosition) -> Self {
         let block_info = Block::from(Self::get_block_id(block));
 
         let mut data = vec![];
@@ -213,9 +258,7 @@ impl BlockFace {
 
             gl::BindVertexArray(vao);
             gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
-            if ebo != 0 {
-                gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
-            }
+            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
 
             for attrs in Self::STANDARD_VAO_ATTRIBS {
                 gl::VertexAttribPointer(
@@ -236,10 +279,10 @@ impl BlockFace {
         vao
     }
 
-    fn render(&self) {
+    pub fn render(&self) {
         unsafe {
             gl::BindVertexArray(self.vao);
-            gl::DrawElements(gl::TRIANGLES, 4, gl::FLOAT, 0 as *const GLvoid);
+            gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0 as *const GLvoid);
         }
     }
 }

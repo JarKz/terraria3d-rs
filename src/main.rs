@@ -27,7 +27,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         game.update();
         game.render();
-        println!("{}", game.fps());
+        game.fps();
+        // println!("{}", game.fps());
 
         window.update();
     }

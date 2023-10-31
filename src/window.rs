@@ -38,9 +38,20 @@ impl Window {
             .allow_highdpi()
             .build()?;
 
+
         let gl_context = window_context.gl_create_context()?;
         gl::load_with(|s| video_subsystem.gl_get_proc_address(s) as *const gl::types::GLvoid);
 
+        sdl.mouse().set_relative_mouse_mode(true);
+
+        unsafe {
+            gl::Viewport(0, 0, width as i32, height as i32);
+            #[cfg(target_os = "macos")]
+            {
+                gl::Viewport(0, 0, width as i32 * 2, height as i32 * 2);
+            }
+            gl::ClearColor(0.3, 0.3, 0.5, 1.0);
+        }
         Ok(Self { sdl, window_context, gl_context, width, height })
     }
 

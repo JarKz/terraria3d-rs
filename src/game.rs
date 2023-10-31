@@ -1,4 +1,4 @@
-use crate::window::Window;
+use crate::{window::Window, render::mesh::{BlockFace, RenderPosition}};
 use sdl2::{event::Event, keyboard::Keycode};
 
 pub mod player;
@@ -10,6 +10,8 @@ use world::World;
 pub struct Game {
     player: Player,
     world: World,
+
+    test: BlockFace,
 
     timer: sdl2::TimerSubsystem,
     last_frame: u32,
@@ -27,6 +29,8 @@ impl Game {
         Ok(Game {
             player: Player::new(window.width() as f32, window.height() as f32, 0.1f32, 30f32),
             world: World::new(DEFAULT_SEED, DEFAULT_BLOCK_SIZE),
+
+            test: BlockFace::new(1, nalgebra_glm::vec3(0., 0., 0.), &RenderPosition::NORTH),
 
             timer: window.timer()?,
             last_frame: 0,
@@ -74,17 +78,23 @@ impl Game {
 
     pub fn update(&mut self) {
         let current = self.timer.ticks();
-        let delta_timer = (self.timer.ticks() - self.last_frame) as f32;
+        let delta_timer = (current - self.last_frame) as f32 / 1000.0;
 
         self.player.process_move(delta_timer);
-
-        self.world.update_shaders(self.player.position());
-        self.world.render(self.player.projection(), &self.player.look_at());
 
         self.last_frame = current;
     }
 
-    pub fn render(&mut self) {}
+    pub fn render(&mut self) {
+        unsafe {
+            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+        }
+
+        self.world.test();
+        self.test.render();
+        // self.world.update_shaders(self.player.position());
+        // self.world.render(self.player.projection(), &self.player.look_at());
+    }
 
     pub fn new_loop(&mut self) {
         self.start_performance_counter = self.timer.performance_counter();

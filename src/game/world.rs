@@ -19,20 +19,25 @@ impl World {
     pub fn new(seed: u32, blocksize: f32) -> Self {
         let offset = blocksize * Chunk::WIDTH as f32;
         let mut chunks = vec![vec![]; 3];
-        for x in 0..3 {
-            for z in 0..3 {
-                chunks[x].push(Chunk::create(seed, x as f32 * offset, z as f32 * offset));
+        for x in 0..1 {
+            for z in 0..1 {
+        // for x in 0..3 {
+        //     for z in 0..3 {
+                let mut chunk = Chunk::create(seed, x as f32 * offset, z as f32 * offset);
+                chunk.create_mesh(blocksize);
+                chunks[x].push(chunk);
             }
         }
-        let vshader = Shader::from_vertex(String::from("../res/shaders/block-vert.glsl")).unwrap();
+
+        let vshader = Shader::from_vertex(String::from("res/shaders/block-vert.glsl")).unwrap();
         let fshader =
-            Shader::from_fragment(String::from("../res/shaders/block-frag.glsl")).unwrap();
+            Shader::from_fragment(String::from("res/shaders/block-frag.glsl")).unwrap();
         Self {
             seed,
             blocksize,
             chunks,
             texture_atlas: TextureAtlas::from(TextureAtlasConfiguration {
-                image_path: String::from("../res/images/block-texture-atlas.png"),
+                image_path: String::from("res/images/block-texture-atlas.png"),
                 square_size: 16,
             }),
             shader_program: Program::from([vshader, fshader]),
@@ -46,20 +51,29 @@ impl World {
     }
 
     pub fn render(&self, projection: &Mat4, view: &Mat4) {
-        // for mesh in &self.chunk_meshs {
-        //     mesh.render(projection, view);
-        // }
         self.texture_atlas.set_used();
         self.shader_program.set_used();
         self.shader_program.insert_mat4(&std::ffi::CString::new("projection").unwrap(), projection);
         self.shader_program.insert_mat4(&std::ffi::CString::new("view").unwrap(), view);
+        for zchunk in &self.chunks {
+            for chunk in zchunk {
+                chunk.render(&self.shader_program);
+            }
+        }
+    }
+
+    pub fn test(&self) {
+        // self.texture_atlas.set_used();
+        self.shader_program.set_used();
     }
 }
 
 /// Block data stores as 3D array by yxz (height, x and z offset) and their u64 looks like:
 /// 48 bits - metatdata information
 /// 16 bits - block id
-type ChunkBlocks = [[[u64; Chunk::WIDTH]; Chunk::WIDTH]; Chunk::HEIGHT];
+pub type ChunkBlocks = [[[u64; Chunk::WIDTH]; Chunk::WIDTH]; Chunk::HEIGHT];
+
+use crate::render::mesh::ChunkMesh;
 
 pub struct Chunk {
     xoffset: f32,
@@ -69,6 +83,7 @@ pub struct Chunk {
     /// 48 bits - metatdata information
     /// 16 bits - block id
     blocks: ChunkBlocks,
+    mesh: Option<ChunkMesh>,
 }
 
 use nalgebra_glm::{Mat4, Vec3};
@@ -104,6 +119,7 @@ impl Chunk {
             xoffset,
             zoffset,
             blocks,
+            mesh: None
         }
     }
 
@@ -118,6 +134,16 @@ impl Chunk {
     pub fn blocks(&self) -> &ChunkBlocks {
         &self.blocks
     }
+
+    fn create_mesh(&mut self, blocksize: f32) {
+        self.mesh = Some(ChunkMesh::new(&self.blocks, self.xoffset, self.zoffset, blocksize));
+    }
+
+    fn render(&self, shader_program: &Program) {
+        if let Some(mesh) = &self.mesh {
+            mesh.render(shader_program);
+        }
+    }
 }
 
 impl Clone for Chunk {
@@ -126,6 +152,7 @@ impl Clone for Chunk {
             xoffset: self.xoffset,
             zoffset: self.zoffset,
             blocks: self.blocks.clone(),
+            mesh: self.mesh.clone(),
         }
     }
 }
