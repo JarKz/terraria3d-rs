@@ -9,6 +9,5 @@ uniform sampler2DArray texel;
 
 void main()
 {
-    // Color = texture(texel, vec3(uv_t, 0.0f));
-    Color = vec4(1.0f, 1.0f, 1.0f, 1.0f);
+    Color = texture(texel, vec3(uv_t, 0.0f));
 }

@@ -51,6 +51,7 @@ impl Window {
                 gl::Viewport(0, 0, width as i32 * 2, height as i32 * 2);
             }
             gl::ClearColor(0.3, 0.3, 0.5, 1.0);
+            gl::Enable(gl::DEPTH_TEST);
         }
         Ok(Self { sdl, window_context, gl_context, width, height })
     }

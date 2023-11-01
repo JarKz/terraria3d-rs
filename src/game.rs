@@ -1,4 +1,4 @@
-use crate::{window::Window, render::mesh::{BlockFace, RenderPosition}};
+use crate::window::Window;
 use sdl2::{event::Event, keyboard::Keycode};
 
 pub mod player;
@@ -11,8 +11,6 @@ pub struct Game {
     player: Player,
     world: World,
 
-    test: BlockFace,
-
     timer: sdl2::TimerSubsystem,
     last_frame: u32,
 
@@ -21,16 +19,14 @@ pub struct Game {
 
 //TODO:
 //This is temporary values, need to change to methods from other structs!
-const DEFAULT_SEED: u32 = 1;
-const DEFAULT_BLOCK_SIZE: f32 = 0.4;
+const DEFAULT_SEED: u32 = 2;
+const DEFAULT_BLOCK_SIZE: f32 = 1.;
 
 impl Game {
     pub fn init(window: &Window) -> Result<Game, String> {
         Ok(Game {
-            player: Player::new(window.width() as f32, window.height() as f32, 0.1f32, 30f32),
+            player: Player::new(window.width() as f32 / window.height() as f32, 45f32, 0.1f32, 50f32),
             world: World::new(DEFAULT_SEED, DEFAULT_BLOCK_SIZE),
-
-            test: BlockFace::new(1, nalgebra_glm::vec3(0., 0., 0.), &RenderPosition::NORTH),
 
             timer: window.timer()?,
             last_frame: 0,
@@ -81,6 +77,7 @@ impl Game {
         let delta_timer = (current - self.last_frame) as f32 / 1000.0;
 
         self.player.process_move(delta_timer);
+        self.world.update_position(self.player.position());
 
         self.last_frame = current;
     }
@@ -90,10 +87,7 @@ impl Game {
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
         }
 
-        self.world.test();
-        self.test.render();
-        // self.world.update_shaders(self.player.position());
-        // self.world.render(self.player.projection(), &self.player.look_at());
+        self.world.render(self.player.projection(), &self.player.look_at());
     }
 
     pub fn new_loop(&mut self) {
@@ -106,6 +100,7 @@ impl Game {
         let elapsed = (self.timer.performance_counter() - self.start_performance_counter) as f32
             / self.timer.performance_frequency() as f32
             * 1000.0;
+        //TODO: Fix. Need to show normal FPS
         let normalized_fps = (Self::FPS60 - elapsed).floor();
         self.timer.delay(normalized_fps as u32);
         1000f32 / normalized_fps

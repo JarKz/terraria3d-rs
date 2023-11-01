@@ -28,30 +28,69 @@ pub struct ChunkMesh {
 }
 
 impl ChunkMesh {
-    pub fn new(blocks: &ChunkBlocks, xoffset: f32, zoffset: f32, blocksize: f32) -> Self {
+    pub fn new(
+        blocks: &ChunkBlocks,
+        xoffset: f32,
+        zoffset: f32,
+        blocksize: f32,
+        world: &crate::world::WorldHelper,
+    ) -> Self {
         let mut mesh = vec![];
         let mut offset = vec3(xoffset, 0., zoffset);
         for y in 0..Chunk::HEIGHT {
             offset = vec3(xoffset, offset.y, zoffset);
             for x in 0..Chunk::WIDTH {
+                offset.z = zoffset;
                 for z in 0..Chunk::WIDTH {
-                    if Self::is_air(blocks[y][x][z]) {
+                    let block = blocks[y][x][z];
+                    if Self::is_air(block) {
+                        offset.z += blocksize;
                         continue;
                     }
 
                     let mut positions = vec![];
-                    if x == 0 || Self::is_air(blocks[y][x - 1][z]) {
+                    if x == 0 {
+                        let b = world.get_block_at(&vec3(xoffset - blocksize, offset.y, offset.z));
+                        if let Some(b) = b {
+                            if Self::is_air(b) {
+                                positions.push(RenderPosition::WEST);
+                            }
+                        }
+                    } else if Self::is_air(blocks[y][x - 1][z]) {
                         positions.push(RenderPosition::WEST);
                     }
-                    if x + 1 == Chunk::WIDTH || Self::is_air(blocks[y][x + 1][z]) {
+                    if x + 1 == Chunk::WIDTH {
+                        let b = world.get_block_at(&vec3(offset.x + blocksize, offset.y, offset.z));
+                        if let Some(b) = b {
+                            if Self::is_air(b) {
+                                positions.push(RenderPosition::EAST);
+                            }
+                        }
+                    } else if Self::is_air(blocks[y][x + 1][z]) {
                         positions.push(RenderPosition::EAST);
                     }
-                    if z == 0 || Self::is_air(blocks[y][x][z - 1]) {
+
+                    if z == 0 {
+                        let b = world.get_block_at(&vec3(offset.x, offset.y, zoffset - blocksize));
+                        if let Some(b) = b {
+                            if Self::is_air(b) {
+                                positions.push(RenderPosition::NORTH);
+                            }
+                        }
+                    } else if Self::is_air(blocks[y][x][z - 1]) {
                         positions.push(RenderPosition::NORTH);
                     }
-                    if z + 1 == Chunk::WIDTH || Self::is_air(blocks[y][x][z + 1]) {
+                    if z + 1 == Chunk::WIDTH {
+                        let b = world.get_block_at(&vec3(offset.x, offset.y, offset.z + blocksize));
+                        if let Some(b) = b {
+                            if Self::is_air(b) {
+                                positions.push(RenderPosition::SOUTH);
+                            }
+                        }
+                    } else if Self::is_air(blocks[y][x][z + 1]) {
                         positions.push(RenderPosition::SOUTH);
                     }
+
                     if y == 0 || Self::is_air(blocks[y - 1][x][z]) {
                         positions.push(RenderPosition::BOTTOM);
                     }
@@ -60,7 +99,7 @@ impl ChunkMesh {
                     }
 
                     for pos in &positions {
-                        mesh.push(BlockFace::new(blocks[y][x][z], offset, pos))
+                        mesh.push(BlockFace::new(block, &offset, pos));
                     }
                     offset.z += blocksize;
                 }
@@ -76,7 +115,6 @@ impl ChunkMesh {
     }
 
     pub fn render(&self, shader_program: &super::Program) {
-        println!("{}", self.mesh.len());
         for block_face in &self.mesh {
             shader_program
                 .insert_mat4(&std::ffi::CString::new("model").unwrap(), &block_face.model);
@@ -146,7 +184,7 @@ impl BlockFace {
     ];
 
     /// For EBO
-    const MAPPING_VERTEX_INDICES: [usize; 6] = [0, 1, 2, 1, 2, 3];
+    const MAPPING_VERTEX_INDICES: [GLuint; 6] = [0, 1, 2, 1, 2, 3];
     const TEXTURE_UV: [[f32; 2]; 4] = [[0., 0.], [0., 1.], [1., 0.], [1., 1.]];
 
     const STRIDE: usize = 8;
@@ -177,7 +215,7 @@ impl BlockFace {
         },
     ];
 
-    pub fn new(block: u64, offset: Vec3, pos: &RenderPosition) -> Self {
+    pub fn new(block: u64, offset: &Vec3, pos: &RenderPosition) -> Self {
         let block_info = Block::from(Self::get_block_id(block));
 
         let mut data = vec![];
@@ -193,7 +231,7 @@ impl BlockFace {
         let vbo = Self::create_vbo(data, gl::STATIC_DRAW);
         let ebo = Self::create_ebo(gl::STATIC_DRAW);
         let vao = Self::create_vao(vbo, ebo);
-        let model = translate(&Mat4::identity(), &offset);
+        let model = translate(&Mat4::identity(), offset);
 
         Self {
             vbo,
@@ -241,7 +279,7 @@ impl BlockFace {
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, id);
             gl::BufferData(
                 gl::ELEMENT_ARRAY_BUFFER,
-                (Self::MAPPING_VERTEX_INDICES.len() * std::mem::size_of::<gl::types::GLuint>())
+                (Self::MAPPING_VERTEX_INDICES.len() * std::mem::size_of::<GLuint>())
                     as gl::types::GLsizeiptr,
                 Self::MAPPING_VERTEX_INDICES.as_ptr() as *const gl::types::GLvoid,
                 usage,
@@ -282,7 +320,9 @@ impl BlockFace {
     pub fn render(&self) {
         unsafe {
             gl::BindVertexArray(self.vao);
+            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.ebo);
             gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0 as *const GLvoid);
+            gl::BindVertexArray(0);
         }
     }
 }

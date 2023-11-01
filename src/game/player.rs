@@ -29,7 +29,7 @@ pub struct Player {
 impl Player {
     const DEFAULT_PITCH: f32 = 0.0;
     const DEFAULT_YAW: f32 = -90.0;
-    const DEFAULT_VELOCITY: f32 = 2.5;
+    const DEFAULT_VELOCITY: f32 = 5.;
     const DEFAULT_SENSITIVITY: f32 = 0.1;
 
     const DEFAULT_MAX_UP_ROTATION: f32 = 89.0;
@@ -40,8 +40,8 @@ impl Player {
             projection: perspective(aspect, fovy, near, far),
             //TODO:
             //CHANGE IT IN FUTURE TO NORMAL POSITION
-            position: vec3(0.0, 0.0, 0.0),
-            target: vec3(0.0, 0.0, -1.0),
+            position: vec3(0.0, 100.0, 0.0),
+            target: vec3(0.0, 100.0, -1.0),
             up: vec3(0.0, 1.0, 0.0),
             pitch: Self::DEFAULT_PITCH,
             yaw: Self::DEFAULT_YAW,
@@ -166,6 +166,6 @@ impl Player {
     }
 
     pub fn look_at(&self) -> Mat4 {
-        look_at(&self.position, &self.target, &self.up)
+        look_at(&self.position, &(self.position.clone() + self.target), &self.up)
     }
 }
