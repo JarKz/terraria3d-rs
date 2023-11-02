@@ -36,6 +36,15 @@ impl Game {
 
     pub fn handle(&mut self, event: Event) {
         match event {
+            Event::MouseButtonDown { mouse_btn, .. } => {
+                match mouse_btn {
+                    sdl2::mouse::MouseButton::Left => {
+                        self.world.destroy_block_if_possible(self.player.position(), self.player.view_ray());
+                    },
+                    sdl2::mouse::MouseButton::Right => (),
+                    _ => (),
+                }
+            }
             Event::KeyDown { keycode, .. } => {
                 if keycode.is_none() {
                     return;

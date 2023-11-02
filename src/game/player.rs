@@ -41,7 +41,7 @@ impl Player {
             //TODO:
             //CHANGE IT IN FUTURE TO NORMAL POSITION
             position: vec3(0.0, 100.0, 0.0),
-            target: vec3(0.0, 100.0, -1.0),
+            target: vec3(0.0, 0.0, -1.0),
             up: vec3(0.0, 1.0, 0.0),
             pitch: Self::DEFAULT_PITCH,
             yaw: Self::DEFAULT_YAW,
@@ -167,5 +167,9 @@ impl Player {
 
     pub fn look_at(&self) -> Mat4 {
         look_at(&self.position, &(self.position.clone() + self.target), &self.up)
+    }
+
+    pub fn view_ray(&self) -> &Vec3 {
+        &self.target
     }
 }

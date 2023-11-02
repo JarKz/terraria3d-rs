@@ -28,6 +28,19 @@ impl Block {
     pub fn zoffset_texure(&self) -> usize {
         self.texutre_offset
     }
+
+    const BIT_WIDTH: usize = 16;
+    pub fn is_air(mut block: u64) -> bool {
+        let mut answer = true;
+        for _ in 0..Self::BIT_WIDTH {
+            if block & 1 == 1 {
+                answer = false;
+                break;
+            }
+            block >>= 1;
+        }
+        answer
+    }
 }
 
 impl Clone for Block {

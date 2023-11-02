@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-
+use crate::render::block::Block;
 use crate::render::{Program, Shader, TextureAtlas, TextureAtlasConfiguration};
 
 use std::collections::HashMap;
@@ -64,10 +64,108 @@ impl World {
         world
     }
 
+    const RAY_DISTANCE: usize = 4;
+    pub fn destroy_block_if_possible(&mut self, player_position: &Vec3, view_ray: &Vec3) {
+        let world_helper = WorldHelper {
+            chunks: self.chunks.clone(),
+            blocksize: self.blocksize,
+        };
+
+        for i in 0..Self::RAY_DISTANCE {
+            let player_looking_to = player_position + view_ray * i as f32;
+            let mut xyz_normalized = player_looking_to / self.blocksize;
+
+            //normalize camera target position
+            xyz_normalized = vec3(
+                xyz_normalized.x.floor(),
+                xyz_normalized.y.floor(),
+                xyz_normalized.z.floor(),
+            );
+
+            xyz_normalized.x = shift_negative_coord(xyz_normalized.x);
+            xyz_normalized.z = shift_negative_coord(xyz_normalized.z);
+
+            let xyz_normalized = vec3(
+                xyz_normalized.x as isize,
+                xyz_normalized.y as isize,
+                xyz_normalized.z as isize,
+            );
+
+            let xchunk_offset = xyz_normalized.x / Chunk::WIDTH_ISIZE;
+            let zchunk_offset = xyz_normalized.z / Chunk::WIDTH_ISIZE;
+
+            if let Some(chunk) = self.chunks.get_mut(&(xchunk_offset, zchunk_offset)) {
+                let x = shift_negative_block_coord(xyz_normalized.x % Chunk::WIDTH_ISIZE);
+                let y = xyz_normalized.y as usize;
+                let z = shift_negative_block_coord(xyz_normalized.z % Chunk::WIDTH_ISIZE);
+
+                let block = &mut chunk.blocks[y][x as usize][z as usize];
+                if Block::is_air(*block) {
+                    continue;
+                }
+
+                *block = 0;
+                chunk.create_mesh(&world_helper, self.blocksize);
+
+                self.rerender_neighbors(x, y, z, xchunk_offset, zchunk_offset);
+                break;
+            }
+        }
+    }
+
+    fn rerender_neighbors(
+        &mut self,
+        x: usize,
+        y: usize,
+        z: usize,
+        xchunk_offset: isize,
+        zchunk_offset: isize,
+    ) {
+        let mut world_helper = WorldHelper {
+            chunks: self.chunks.clone(),
+            blocksize: self.blocksize,
+        };
+        if x == 0 {
+            if let Some(chunk) = self.chunks.get_mut(&(xchunk_offset - 1, zchunk_offset)) {
+                let block = chunk.blocks[y][Chunk::WIDTH - 1][z as usize];
+                if !Block::is_air(block) {
+                    chunk.create_mesh(&world_helper, self.blocksize);
+                    world_helper.chunks = self.chunks.clone();
+                }
+            }
+        } else if x == Chunk::WIDTH - 1 {
+            if let Some(chunk) = self.chunks.get_mut(&(xchunk_offset + 1, zchunk_offset)) {
+                let block = chunk.blocks[y][0][z as usize];
+                if !Block::is_air(block) {
+                    chunk.create_mesh(&world_helper, self.blocksize);
+                    world_helper.chunks = self.chunks.clone();
+                }
+            }
+        }
+
+        if z == 0 {
+            if let Some(chunk) = self.chunks.get_mut(&(xchunk_offset, zchunk_offset - 1)) {
+                let block = chunk.blocks[y][x as usize][Chunk::WIDTH - 1];
+                if !Block::is_air(block) {
+                    chunk.create_mesh(&world_helper, self.blocksize);
+                    world_helper.chunks = self.chunks.clone();
+                }
+            }
+        } else if z == Chunk::WIDTH - 1 {
+            if let Some(chunk) = self.chunks.get_mut(&(xchunk_offset, zchunk_offset + 1)) {
+                let block = chunk.blocks[y][x as usize][0];
+                if !Block::is_air(block) {
+                    chunk.create_mesh(&world_helper, self.blocksize);
+                    world_helper.chunks = self.chunks.clone();
+                }
+            }
+        }
+    }
+
     pub fn update_position(&mut self, player_position: &Vec3) {
         let normalized_ps = player_position * self.blocksize;
-        let xplayer_pos = normalized_ps.x as isize / Chunk::WIDTH as isize;
-        let zplayer_pos = normalized_ps.z as isize / Chunk::WIDTH as isize;
+        let xplayer_pos = normalized_ps.x as isize / Chunk::WIDTH_ISIZE;
+        let zplayer_pos = normalized_ps.z as isize / Chunk::WIDTH_ISIZE;
         if self.render_center.0 == xplayer_pos && self.render_center.1 == zplayer_pos {
             return;
         }
@@ -143,28 +241,41 @@ pub struct WorldHelper {
 impl WorldHelper {
     pub fn get_block_at(&self, xyz: &Vec3) -> Option<u64> {
         let mut xyz_normalized = xyz / self.blocksize;
-        if xyz_normalized.x < 0. && xyz_normalized.x % Chunk::WIDTH as f32 != 0. {
-            xyz_normalized.x -= Chunk::WIDTH as f32;
-        }
-        if xyz_normalized.z < 0. && xyz_normalized.z % Chunk::WIDTH as f32 != 0. {
-            xyz_normalized.z -= Chunk::WIDTH as f32;
-        }
-        let xchunk_offset = xyz_normalized.x as isize / Chunk::WIDTH as isize;
-        let zchunk_offset = xyz_normalized.z as isize / Chunk::WIDTH as isize;
+
+        xyz_normalized.x = shift_negative_coord(xyz_normalized.x);
+        xyz_normalized.z = shift_negative_coord(xyz_normalized.z);
+
+        let xyz_normalized = vec3(
+            xyz_normalized.x as isize,
+            xyz_normalized.y as isize,
+            xyz_normalized.z as isize,
+        );
+
+        let xchunk_offset = xyz_normalized.x / Chunk::WIDTH_ISIZE;
+        let zchunk_offset = xyz_normalized.z / Chunk::WIDTH_ISIZE;
         if let Some(chunk) = self.chunks.get(&(xchunk_offset, zchunk_offset)) {
-            let mut x = xyz_normalized.x as isize % Chunk::WIDTH as isize;
-            if x < 0 {
-                x += Chunk::WIDTH as isize;
-            }
+            let x = shift_negative_block_coord(xyz_normalized.x % Chunk::WIDTH_ISIZE);
             let y = xyz_normalized.y as usize;
-            let mut z = xyz_normalized.z as isize % Chunk::WIDTH as isize;
-            if z < 0 {
-                z += Chunk::WIDTH as isize;
-            }
+            let z = shift_negative_block_coord(xyz_normalized.z % Chunk::WIDTH_ISIZE);
+
             return Some(chunk.blocks[y][x as usize][z as usize]);
         }
         None
     }
+}
+
+fn shift_negative_block_coord(mut coord: isize) -> usize {
+    if coord < 0 {
+        coord += Chunk::WIDTH_ISIZE;
+    }
+    coord as usize
+}
+
+fn shift_negative_coord(mut coord: f32) -> f32 {
+    if coord < 0. && coord % Chunk::WIDTH as f32 != 0. {
+        coord -= Chunk::WIDTH as f32;
+    }
+    coord
 }
 
 /// Block data stores as 3D array by yxz (height, x and z offset) and their u64 looks like:
@@ -185,10 +296,12 @@ pub struct Chunk {
     mesh: Option<ChunkMesh>,
 }
 
-use nalgebra_glm::{Mat4, Vec3};
+use nalgebra_glm::{vec3, Mat4, Vec3};
 use noise::*;
 
 impl Chunk {
+    pub const WIDTH_ISIZE: isize = 16;
+
     pub const WIDTH: usize = 16;
     pub const HEIGHT: usize = 216;
 
