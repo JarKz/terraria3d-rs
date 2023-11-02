@@ -39,7 +39,7 @@ fn run() {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::Builder::new()
-        .stack_size(8 * 1024 * 1024)
+        .stack_size(32 * 1024 * 1024)
         .spawn(run)
         .unwrap()
         .join()

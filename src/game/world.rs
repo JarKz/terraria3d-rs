@@ -3,6 +3,8 @@ use crate::render::{block::Block, mesh::BlockRenderer};
 use crate::render::{Program, Shader, TextureAtlas, TextureAtlasConfiguration};
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::thread::JoinHandle;
 
 const DATA_FILE: &str = "data/test-world.dat";
 
@@ -13,7 +15,15 @@ pub struct World {
     render_center: (isize, isize),
     render_radius_in_chunks: usize,
 
+    creating_chunks: Vec<JoinHandle<((isize, isize), Chunk)>>,
+    to_create_mesh: Vec<(isize, isize)>,
+    rerendering_chunks: Vec<JoinHandle<((isize, isize), Chunk)>>,
+
     chunks: HashMap<(isize, isize), Chunk>,
+
+    need_reload_wh: bool,
+    world_helper: Arc<WorldHelper>,
+
     texture_atlas: TextureAtlas,
     shader_program: Program,
     block_renderer: BlockRenderer,
@@ -32,7 +42,19 @@ impl World {
             blocksize,
             render_center: (0, 0),
             render_radius_in_chunks: 3,
+
+            creating_chunks: vec![],
+            to_create_mesh: vec![],
+            rerendering_chunks: vec![],
+
             chunks: HashMap::new(),
+
+            need_reload_wh: false,
+            world_helper: Arc::new(WorldHelper {
+                chunks: HashMap::new(),
+                blocksize,
+            }),
+
             texture_atlas: TextureAtlas::from(TextureAtlasConfiguration {
                 image_path: String::from("res/images/block-texture-atlas.png"),
                 square_size: 16,
@@ -164,7 +186,7 @@ impl World {
         }
     }
 
-    pub fn update_position(&mut self, player_position: &Vec3) {
+    pub fn update_player_position(&mut self, player_position: &Vec3) {
         let normalized_ps = player_position * self.blocksize;
         let xplayer_pos = normalized_ps.x as isize / Chunk::WIDTH_ISIZE;
         let zplayer_pos = normalized_ps.z as isize / Chunk::WIDTH_ISIZE;
@@ -177,31 +199,26 @@ impl World {
         let xmax = xplayer_pos + radius;
         let zmin = zplayer_pos - radius;
         let zmax = zplayer_pos + radius;
-        let mut to_create_mesh = vec![];
+        let offset = self.blocksize * Chunk::WIDTH as f32;
         for x in xmin..=xmax {
             for z in zmin..=zmax {
                 if self.chunks.get(&(x, z)).is_none() {
-                    let new_chunk = Chunk::create(
-                        self.seed,
-                        x as f32 * self.blocksize * Chunk::WIDTH as f32,
-                        z as f32 * self.blocksize * Chunk::WIDTH as f32,
+                    let seed = self.seed;
+                    self.creating_chunks.push(
+                        std::thread::Builder::new()
+                            .stack_size(8 * 1024 * 1024)
+                            .spawn(move || {
+                                let new_chunk =
+                                    Chunk::create(seed, x as f32 * offset, z as f32 * offset);
+                                ((x, z), new_chunk)
+                            })
+                            .unwrap(),
                     );
-                    self.chunks.insert((x, z), new_chunk);
                 }
-                to_create_mesh.push((x, z));
+                self.to_create_mesh.push((x, z));
             }
         }
-
-        let world_helper = WorldHelper {
-            blocksize: self.blocksize,
-            chunks: self.chunks.clone(),
-        };
-
-        for (x, z) in to_create_mesh {
-            if let Some(chunk) = self.chunks.get_mut(&(x, z)) {
-                chunk.create_mesh(&world_helper, self.blocksize);
-            }
-        }
+        self.need_reload_wh = true;
 
         let (xcenter, zcenter) = self.render_center;
         let old_xmin = xcenter - radius;
@@ -218,8 +235,74 @@ impl World {
                 }
             }
         }
-
         self.render_center = (xplayer_pos, zplayer_pos);
+    }
+
+    pub fn update_state(&mut self) {
+        let mut indices = vec![];
+        for i in 0..self.creating_chunks.len() {
+            if self.creating_chunks[i].is_finished() {
+                indices.push(i);
+            }
+        }
+
+        for i in indices.iter().rev() {
+            let t = self.creating_chunks.remove(*i);
+            let ((x, z), chunk) = t.join().unwrap();
+            self.chunks.insert((x, z), chunk);
+        }
+
+        if indices.len() > 0 || self.creating_chunks.len() > 0 {
+            return;
+        }
+
+        if self.need_reload_wh {
+            self.world_helper = Arc::new(WorldHelper {
+                blocksize: self.blocksize,
+                chunks: self.chunks.clone(),
+            });
+            self.need_reload_wh = false;
+            return;
+        }
+
+        let mut counter = 0;
+        let max = 3;
+        while let Some((x, z)) = self.to_create_mesh.pop() {
+            if let Some(chunk) = self.chunks.get_mut(&(x, z)) {
+                let mut chunk = chunk.clone();
+                let blocksize = self.blocksize;
+                let world_helper = self.world_helper.clone();
+                self.rerendering_chunks.push(
+                    std::thread::Builder::new()
+                        .stack_size(8 * 1024 * 1024)
+                        .spawn(move || {
+                            chunk.create_mesh(&world_helper, blocksize);
+                            ((x, z), chunk)
+                        })
+                        .unwrap(),
+                );
+            }
+            counter += 1;
+            if counter == max {
+                return;
+            }
+        }
+
+        if counter > 0 || self.to_create_mesh.len() > 0 {
+            return;
+        }
+
+        let mut indices = vec![];
+        for i in 0..self.rerendering_chunks.len() {
+            if self.rerendering_chunks[i].is_finished() {
+                indices.push(i);
+            }
+        }
+        for i in indices.into_iter().rev() {
+            let t = self.rerendering_chunks.remove(i);
+            let ((x, z), chunk) = t.join().unwrap();
+            self.chunks.insert((x, z), chunk);
+        }
     }
 
     pub fn render(&self, projection: &Mat4, view: &Mat4) {
@@ -380,7 +463,7 @@ impl Clone for Chunk {
             xoffset: self.xoffset,
             zoffset: self.zoffset,
             blocks: self.blocks.clone(),
-            //Don't clone because of destroying vao, vbo and ebo
+            // Clonning this may ruin performance
             mesh: None,
         }
     }

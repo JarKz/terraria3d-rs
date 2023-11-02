@@ -25,7 +25,7 @@ const DEFAULT_BLOCK_SIZE: f32 = 1.;
 impl Game {
     pub fn init(window: &Window) -> Result<Game, String> {
         Ok(Game {
-            player: Player::new(window.width() as f32 / window.height() as f32, 45f32, 0.1f32, 50f32),
+            player: Player::new(window.width() as f32 / window.height() as f32, 45f32, 0.1f32, 100f32),
             world: World::new(DEFAULT_SEED, DEFAULT_BLOCK_SIZE),
 
             timer: window.timer()?,
@@ -86,7 +86,8 @@ impl Game {
         let delta_timer = (current - self.last_frame) as f32 / 1000.0;
 
         self.player.process_move(delta_timer);
-        self.world.update_position(self.player.position());
+        self.world.update_player_position(self.player.position());
+        self.world.update_state();
 
         self.last_frame = current;
     }
