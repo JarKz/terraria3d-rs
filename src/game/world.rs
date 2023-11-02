@@ -30,7 +30,7 @@ impl World {
             seed,
             blocksize,
             render_center: (0, 0),
-            render_radius_in_chunks: 2,
+            render_radius_in_chunks: 3,
             chunks: HashMap::new(),
             texture_atlas: TextureAtlas::from(TextureAtlasConfiguration {
                 image_path: String::from("res/images/block-texture-atlas.png"),
@@ -39,8 +39,9 @@ impl World {
             shader_program: Program::from([vshader, fshader]),
         };
 
-        for x in -2..3 {
-            for z in -2..3 {
+        let radius = world.render_radius_in_chunks as isize;
+        for x in -radius..=radius {
+            for z in -radius..=radius {
                 let chunk = Chunk::create(seed, x as f32 * offset, z as f32 * offset);
                 world.chunks.insert((x, z), chunk);
             }
@@ -71,13 +72,12 @@ impl World {
             return;
         }
 
-        self.render_center = (xplayer_pos, zplayer_pos);
-
         let radius = self.render_radius_in_chunks as isize;
         let xmin = xplayer_pos - radius;
         let xmax = xplayer_pos + radius;
         let zmin = zplayer_pos - radius;
         let zmax = zplayer_pos + radius;
+        let mut to_create_mesh = vec![];
         for x in xmin..=xmax {
             for z in zmin..=zmax {
                 if self.chunks.get(&(x, z)).is_none() {
@@ -88,6 +88,7 @@ impl World {
                     );
                     self.chunks.insert((x, z), new_chunk);
                 }
+                to_create_mesh.push((x, z));
             }
         }
 
@@ -96,18 +97,29 @@ impl World {
             chunks: self.chunks.clone(),
         };
 
-        let mut to_remove = vec![];
-        for ((i, j), chunk) in &mut self.chunks {
-            if *i < xmin || xmax < *i || *j < zmin || zmax < *j {
-                to_remove.push((*i, *j));
-            } else {
+        for (x, z) in to_create_mesh {
+            if let Some(chunk) = self.chunks.get_mut(&(x, z)) {
                 chunk.create_mesh(&world_helper, self.blocksize);
             }
         }
 
-        for (i, j) in to_remove {
-            self.chunks.get_mut(&(i, j)).unwrap().destroy_mesh();
+        let (xcenter, zcenter) = self.render_center;
+        let old_xmin = xcenter - radius;
+        let old_xmax = xcenter + radius;
+        let old_zmin = zcenter - radius;
+        let old_zmax = zcenter + radius;
+
+        for x in old_xmin..=old_xmax {
+            for z in old_zmin..=old_zmax {
+                if x < xmin || xmax < x || z < zmin || zmax < z {
+                    if let Some(chunk) = self.chunks.get_mut(&(x, z)) {
+                        chunk.destroy_mesh();
+                    }
+                }
+            }
         }
+
+        self.render_center = (xplayer_pos, zplayer_pos);
     }
 
     pub fn render(&self, projection: &Mat4, view: &Mat4) {
