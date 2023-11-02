@@ -24,7 +24,6 @@ pub enum RenderPosition {
 pub struct ChunkMesh {
     mesh: Vec<BlockMesh>,
     blocksize: f32,
-    block_faces: Vec<BlockFace>,
 }
 
 impl ChunkMesh {
@@ -107,35 +106,22 @@ impl ChunkMesh {
             }
             offset.y += blocksize;
         }
-        Self {
-            mesh,
-            blocksize,
-            block_faces: (0..6).map(|i| BlockFace::new(i)).collect(),
-        }
+        Self { mesh, blocksize }
     }
 
     fn is_air(block: u64) -> bool {
         (block & 1) == 0
     }
 
-    pub fn render(&self, shader_program: &super::Program) {
+    pub fn render(&self, shader_program: &super::Program, block_renderer: &BlockRenderer) {
         for block_mesh in &self.mesh {
             shader_program
                 .insert_mat4(&std::ffi::CString::new("model").unwrap(), &block_mesh.model);
             for face in &block_mesh.data {
-                self.block_faces[*face].render();
+                block_renderer.render(*face);
             }
         }
     }
-}
-
-struct VaoAttributes {
-    position: GLuint,
-    size: GLint,
-    type_: GLenum,
-    normalized: GLboolean,
-    stride: GLsizei,
-    pointer: *const GLvoid,
 }
 
 struct BlockMesh {
@@ -180,6 +166,65 @@ impl Clone for BlockMesh {
             zoffset_texture: self.zoffset_texture,
         }
     }
+}
+
+pub struct BlockRenderer {
+    // Corresponding to RenderPosition struct
+    faces: [BlockFace; 6],
+}
+
+impl BlockRenderer {
+    pub fn init() -> Self {
+        let mut faces = [
+            BlockFace {
+                vao: 0,
+                vbo: 0,
+                ebo: 0,
+            },
+            BlockFace {
+                vao: 0,
+                vbo: 0,
+                ebo: 0,
+            },
+            BlockFace {
+                vao: 0,
+                vbo: 0,
+                ebo: 0,
+            },
+            BlockFace {
+                vao: 0,
+                vbo: 0,
+                ebo: 0,
+            },
+            BlockFace {
+                vao: 0,
+                vbo: 0,
+                ebo: 0,
+            },
+            BlockFace {
+                vao: 0,
+                vbo: 0,
+                ebo: 0,
+            },
+        ];
+        for (i, face) in faces.iter_mut().enumerate() {
+            *face = BlockFace::new(i);
+        }
+        Self { faces }
+    }
+
+    fn render(&self, pos: usize) {
+        self.faces[pos].render();
+    }
+}
+
+struct VaoAttributes {
+    position: GLuint,
+    size: GLint,
+    type_: GLenum,
+    normalized: GLboolean,
+    stride: GLsizei,
+    pointer: *const GLvoid,
 }
 
 #[derive(Clone)]

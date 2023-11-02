@@ -9,11 +9,14 @@ use game::*;
 
 mod render;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let window = Window::from("Terraria 3D", Window::WIDTH, Window::HEIGHT)?;
-    let mut events = window.event_pump()?;
+fn run() {
+    let window = Window::from("Terraria 3D", Window::WIDTH, Window::HEIGHT)
+        .expect("Window cannot be initialized!");
+    let mut events = window
+        .event_pump()
+        .expect("Must be initialized sdl for pumping event!");
 
-    let mut game = Game::init(&window)?;
+    let mut game = Game::init(&window).expect("Game cannot be initialized!");
 
     'mainloop: loop {
         game.new_loop();
@@ -32,6 +35,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         window.update();
     }
+}
 
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(run)
+        .unwrap()
+        .join()
+        .unwrap();
     Ok(())
 }

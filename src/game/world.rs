@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use crate::render::block::Block;
+use crate::render::{block::Block, mesh::BlockRenderer};
 use crate::render::{Program, Shader, TextureAtlas, TextureAtlasConfiguration};
 
 use std::collections::HashMap;
@@ -16,6 +16,7 @@ pub struct World {
     chunks: HashMap<(isize, isize), Chunk>,
     texture_atlas: TextureAtlas,
     shader_program: Program,
+    block_renderer: BlockRenderer,
 }
 
 impl World {
@@ -37,6 +38,7 @@ impl World {
                 square_size: 16,
             }),
             shader_program: Program::from([vshader, fshader]),
+            block_renderer: BlockRenderer::init(),
         };
 
         let radius = world.render_radius_in_chunks as isize;
@@ -228,7 +230,7 @@ impl World {
         self.shader_program
             .insert_mat4(&std::ffi::CString::new("view").unwrap(), view);
         for (_, chunk) in &self.chunks {
-            chunk.render(&self.shader_program);
+            chunk.render(&self.shader_program, &self.block_renderer);
         }
     }
 }
@@ -365,9 +367,9 @@ impl Chunk {
         self.mesh = None;
     }
 
-    fn render(&self, shader_program: &Program) {
+    fn render(&self, shader_program: &Program, block_rendrer: &BlockRenderer) {
         if let Some(mesh) = &self.mesh {
-            mesh.render(shader_program);
+            mesh.render(shader_program, block_rendrer);
         }
     }
 }
