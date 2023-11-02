@@ -22,9 +22,9 @@ pub enum RenderPosition {
 
 #[derive(Clone)]
 pub struct ChunkMesh {
-    mesh: Vec<BlockFace>,
-    // chunk: &'a Chunk,
+    mesh: Vec<BlockMesh>,
     blocksize: f32,
+    block_faces: Vec<BlockFace>,
 }
 
 impl ChunkMesh {
@@ -98,8 +98,8 @@ impl ChunkMesh {
                         positions.push(RenderPosition::TOP);
                     }
 
-                    for pos in &positions {
-                        mesh.push(BlockFace::new(block, &offset, pos));
+                    if positions.len() > 0 {
+                        mesh.push(BlockMesh::new(block, &offset, positions));
                     }
                     offset.z += blocksize;
                 }
@@ -107,7 +107,11 @@ impl ChunkMesh {
             }
             offset.y += blocksize;
         }
-        Self { mesh, blocksize }
+        Self {
+            mesh,
+            blocksize,
+            block_faces: (0..6).map(|i| BlockFace::new(i)).collect(),
+        }
     }
 
     fn is_air(block: u64) -> bool {
@@ -115,10 +119,12 @@ impl ChunkMesh {
     }
 
     pub fn render(&self, shader_program: &super::Program) {
-        for block_face in &self.mesh {
+        for block_mesh in &self.mesh {
             shader_program
-                .insert_mat4(&std::ffi::CString::new("model").unwrap(), &block_face.model);
-            block_face.render();
+                .insert_mat4(&std::ffi::CString::new("model").unwrap(), &block_mesh.model);
+            for face in &block_mesh.data {
+                self.block_faces[*face].render();
+            }
         }
     }
 }
@@ -132,13 +138,55 @@ struct VaoAttributes {
     pointer: *const GLvoid,
 }
 
+struct BlockMesh {
+    model: Mat4,
+    data: Vec<usize>,
+    zoffset_texture: f32,
+}
+
+impl BlockMesh {
+    fn new(block: u64, offset: &Vec3, postitions: Vec<RenderPosition>) -> Self {
+        let block_info = Block::from(Self::get_block_id(block));
+        let data = postitions
+            .iter()
+            .map(|p| *p as usize)
+            .collect::<Vec<usize>>();
+        let model = translate(&Mat4::identity(), offset);
+        BlockMesh {
+            model,
+            data,
+            zoffset_texture: block_info.zoffset_texure() as f32,
+        }
+    }
+
+    fn get_block_id(block: u64) -> usize {
+        let mut bit = 1;
+        let mut result = 0;
+        for _ in 0..=16 {
+            if bit & block == 1 {
+                result = result | bit;
+            }
+            bit <<= 1;
+        }
+        result as usize
+    }
+}
+
+impl Clone for BlockMesh {
+    fn clone(&self) -> Self {
+        Self {
+            model: self.model.clone(),
+            data: self.data.clone(),
+            zoffset_texture: self.zoffset_texture,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct BlockFace {
     vbo: GLuint,
     vao: GLuint,
     ebo: GLuint,
-    zoffset_texture: f32,
-    model: Mat4,
 }
 
 impl BlockFace {
@@ -215,14 +263,12 @@ impl BlockFace {
         },
     ];
 
-    pub fn new(block: u64, offset: &Vec3, pos: &RenderPosition) -> Self {
-        let block_info = Block::from(Self::get_block_id(block));
-
+    fn new(pos: usize) -> Self {
         let mut data = vec![];
-        let map_vert = Self::MAPPING_VERTICES[*pos as usize];
+        let map_vert = Self::MAPPING_VERTICES[pos];
         map_vert.iter().enumerate().for_each(|(i, vert_index)| {
             data.extend_from_slice(&Self::CUBE_VERTICES[*vert_index]);
-            data.extend_from_slice(&Self::NORM[*pos as usize]);
+            data.extend_from_slice(&Self::NORM[pos]);
             data.extend_from_slice(&Self::TEXTURE_UV[i]);
         });
 
@@ -231,27 +277,8 @@ impl BlockFace {
         let vbo = Self::create_vbo(data, gl::STATIC_DRAW);
         let ebo = Self::create_ebo(gl::STATIC_DRAW);
         let vao = Self::create_vao(vbo, ebo);
-        let model = translate(&Mat4::identity(), offset);
 
-        Self {
-            vbo,
-            vao,
-            ebo,
-            zoffset_texture: block_info.zoffset_texure() as f32,
-            model,
-        }
-    }
-
-    fn get_block_id(block: u64) -> usize {
-        let mut bit = 1;
-        let mut result = 0;
-        for _ in 0..=16 {
-            if bit & block == 1 {
-                result = result | bit;
-            }
-            bit <<= 1;
-        }
-        result as usize
+        Self { vbo, vao, ebo }
     }
 
     fn create_vbo(data: Vec<f32>, usage: GLenum) -> GLuint {
@@ -317,12 +344,10 @@ impl BlockFace {
         vao
     }
 
-    pub fn render(&self) {
+    fn render(&self) {
         unsafe {
             gl::BindVertexArray(self.vao);
-            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.ebo);
             gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0 as *const GLvoid);
-            gl::BindVertexArray(0);
         }
     }
 }
