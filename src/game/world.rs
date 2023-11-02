@@ -53,12 +53,12 @@ impl World {
         for (_, chunk) in &mut world.chunks {
             chunk.create_mesh(&world_helper, blocksize);
         }
-        write_to_file(
-            String::from(DATA_FILE),
-            // String::from("Test-world"),
-            &world.chunks,
-        )
-        .unwrap();
+        // write_to_file(
+        //     String::from(DATA_FILE),
+        //     // String::from("Test-world"),
+        //     &world.chunks,
+        // )
+        // .unwrap();
 
         world
     }
@@ -129,13 +129,12 @@ pub struct WorldHelper {
 }
 
 impl WorldHelper {
-    //TODO: Fix here for negative numbers
     pub fn get_block_at(&self, xyz: &Vec3) -> Option<u64> {
         let mut xyz_normalized = xyz / self.blocksize;
-        if xyz_normalized.x < 0. {
+        if xyz_normalized.x < 0. && xyz_normalized.x % Chunk::WIDTH as f32 != 0. {
             xyz_normalized.x -= Chunk::WIDTH as f32;
         }
-        if xyz_normalized.z < 0. {
+        if xyz_normalized.z < 0. && xyz_normalized.z % Chunk::WIDTH as f32 != 0. {
             xyz_normalized.z -= Chunk::WIDTH as f32;
         }
         let xchunk_offset = xyz_normalized.x as isize / Chunk::WIDTH as isize;
