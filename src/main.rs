@@ -38,11 +38,19 @@ fn run() {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    std::thread::Builder::new()
-        .stack_size(32 * 1024 * 1024)
-        .spawn(run)
-        .unwrap()
-        .join()
-        .unwrap();
+    #[cfg(target_os = "macos")]
+    {
+        run();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .name(String::from("Main"))
+            .spawn(run)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
     Ok(())
 }

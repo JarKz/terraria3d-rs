@@ -1,7 +1,6 @@
-use super::block::*;
+use super::{*, block::*};
 use crate::game::world::{Chunk, ChunkBlocks};
 
-use gl::types::*;
 use nalgebra_glm::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -35,8 +34,11 @@ impl ChunkMesh {
         world: &crate::world::WorldHelper,
     ) -> Self {
         let mut mesh = vec![];
-        let mut offset = vec3(xoffset, 0., zoffset);
-        for y in 0..Chunk::HEIGHT {
+        // let mut offset = vec3(xoffset, 0., zoffset);
+
+        // TODO: It's temporary for increasing performance! In future must be valid logic!
+        let mut offset = vec3(xoffset, blocksize, zoffset);
+        for y in 1..Chunk::HEIGHT {
             offset = vec3(xoffset, offset.y, zoffset);
             for x in 0..Chunk::WIDTH {
                 offset.z = zoffset;
@@ -216,15 +218,6 @@ impl BlockRenderer {
     fn render(&self, pos: usize) {
         self.faces[pos].render();
     }
-}
-
-struct VaoAttributes {
-    position: GLuint,
-    size: GLint,
-    type_: GLenum,
-    normalized: GLboolean,
-    stride: GLsizei,
-    pointer: *const GLvoid,
 }
 
 #[derive(Clone)]

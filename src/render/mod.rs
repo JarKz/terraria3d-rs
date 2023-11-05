@@ -7,6 +7,16 @@ use std::ffi::CString;
 
 pub mod block;
 pub mod mesh;
+pub mod aim;
+
+pub struct VaoAttributes {
+    pub position: GLuint,
+    pub size: GLint,
+    pub type_: GLenum,
+    pub normalized: GLboolean,
+    pub stride: GLsizei,
+    pub pointer: *const GLvoid,
+}
 
 pub struct TextureAtlasConfiguration {
     pub image_path: String,
@@ -144,6 +154,25 @@ impl Program {
                 1,
                 gl::FALSE,
                 matrix.as_ptr(),
+            );
+        }
+    }
+
+    pub fn insert_vec3(&self, fieldname: &CString, vector: &nalgebra_glm::Vec3) {
+        unsafe {
+            gl::Uniform3fv(
+                gl::GetUniformLocation(self.id, fieldname.as_ptr() as *const GLchar),
+                1,
+                vector.as_ptr(),
+            );
+        }
+    }
+
+    pub fn insert_float(&self, fieldname: &CString, vector: f32) {
+        unsafe {
+            gl::Uniform1f(
+                gl::GetUniformLocation(self.id, fieldname.as_ptr() as *const GLchar),
+                vector,
             );
         }
     }

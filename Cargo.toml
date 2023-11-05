@@ -16,3 +16,6 @@ noise = "0.8.2"
 # for texture atlas
 lodepng = "3.8"
 rgb = "0.8.36"
+
+[profile.dev]
+opt-level = 1

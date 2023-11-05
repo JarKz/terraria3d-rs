@@ -41,7 +41,7 @@ impl World {
             seed,
             blocksize,
             render_center: (0, 0),
-            render_radius_in_chunks: 3,
+            render_radius_in_chunks: 4,
 
             creating_chunks: vec![],
             to_create_mesh: vec![],
@@ -66,6 +66,10 @@ impl World {
         let radius = world.render_radius_in_chunks as isize;
         for x in -radius..=radius {
             for z in -radius..=radius {
+                // let sum_of_cathetes = x.pow(2) + z.pow(2);
+                // if sum_of_cathetes > radius.pow(2) {
+                //     continue;
+                // }
                 let chunk = Chunk::create(seed, x as f32 * offset, z as f32 * offset);
                 world.chunks.insert((x, z), chunk);
             }
@@ -88,7 +92,8 @@ impl World {
         world
     }
 
-    const RAY_DISTANCE: usize = 4;
+    const RAY_DISTANCE: usize = 100;
+    const DISTANCE: f32 = 0.4f32;
     pub fn destroy_block_if_possible(&mut self, player_position: &Vec3, view_ray: &Vec3) {
         let world_helper = WorldHelper {
             chunks: self.chunks.clone(),
@@ -96,7 +101,7 @@ impl World {
         };
 
         for i in 0..Self::RAY_DISTANCE {
-            let player_looking_to = player_position + view_ray * i as f32;
+            let player_looking_to = player_position + view_ray * i as f32 * Self::DISTANCE;
             let mut xyz_normalized = player_looking_to / self.blocksize;
 
             //normalize camera target position
@@ -188,8 +193,8 @@ impl World {
 
     pub fn update_player_position(&mut self, player_position: &Vec3) {
         let normalized_ps = player_position * self.blocksize;
-        let xplayer_pos = normalized_ps.x as isize / Chunk::WIDTH_ISIZE;
-        let zplayer_pos = normalized_ps.z as isize / Chunk::WIDTH_ISIZE;
+        let xplayer_pos = normalized_ps.x.round() as isize / Chunk::WIDTH_ISIZE;
+        let zplayer_pos = normalized_ps.z.round() as isize / Chunk::WIDTH_ISIZE;
         if self.render_center.0 == xplayer_pos && self.render_center.1 == zplayer_pos {
             return;
         }
@@ -202,6 +207,11 @@ impl World {
         let offset = self.blocksize * Chunk::WIDTH as f32;
         for x in xmin..=xmax {
             for z in zmin..=zmax {
+                // let sum_of_cathetes = (x - xplayer_pos).pow(2) + (z - zplayer_pos).pow(2);
+                // if sum_of_cathetes > radius.pow(2) {
+                //     continue;
+                // }
+
                 if self.chunks.get(&(x, z)).is_none() {
                     let seed = self.seed;
                     self.creating_chunks.push(
@@ -238,11 +248,15 @@ impl World {
         self.render_center = (xplayer_pos, zplayer_pos);
     }
 
+    const MAX_ACCEPTS: usize = 5;
     pub fn update_state(&mut self) {
         let mut indices = vec![];
         for i in 0..self.creating_chunks.len() {
             if self.creating_chunks[i].is_finished() {
                 indices.push(i);
+            }
+            if indices.len() == Self::MAX_ACCEPTS {
+                break;
             }
         }
 
@@ -266,9 +280,8 @@ impl World {
         }
 
         let mut counter = 0;
-        let max = 3;
         while let Some((x, z)) = self.to_create_mesh.pop() {
-            if let Some(chunk) = self.chunks.get_mut(&(x, z)) {
+            if let Some(chunk) = self.chunks.get(&(x, z)) {
                 let mut chunk = chunk.clone();
                 let blocksize = self.blocksize;
                 let world_helper = self.world_helper.clone();
@@ -283,7 +296,7 @@ impl World {
                 );
             }
             counter += 1;
-            if counter == max {
+            if counter == Self::MAX_ACCEPTS {
                 return;
             }
         }
@@ -297,6 +310,9 @@ impl World {
             if self.rerendering_chunks[i].is_finished() {
                 indices.push(i);
             }
+            if indices.len() == Self::MAX_ACCEPTS {
+                break;
+            }
         }
         for i in indices.into_iter().rev() {
             let t = self.rerendering_chunks.remove(i);
@@ -305,13 +321,35 @@ impl World {
         }
     }
 
-    pub fn render(&self, projection: &Mat4, view: &Mat4) {
+    pub fn render(&self, player: &super::player::Player) {
         self.texture_atlas.set_used();
         self.shader_program.set_used();
+
+        self.shader_program.insert_mat4(
+            &std::ffi::CString::new("projection").unwrap(),
+            player.projection(),
+        );
         self.shader_program
-            .insert_mat4(&std::ffi::CString::new("projection").unwrap(), projection);
-        self.shader_program
-            .insert_mat4(&std::ffi::CString::new("view").unwrap(), view);
+            .insert_mat4(&std::ffi::CString::new("view").unwrap(), &player.look_at());
+
+        self.shader_program.insert_vec3(
+            &std::ffi::CString::new("camera_position").unwrap(),
+            player.position(),
+        );
+        self.shader_program.insert_vec3(
+            &std::ffi::CString::new("fog_color").unwrap(),
+            &vec3(0.3, 0.3, 0.5),
+        );
+
+        self.shader_program.insert_float(
+            &std::ffi::CString::new("fog_min_dist").unwrap(),
+            35.,
+        );
+        self.shader_program.insert_float(
+            &std::ffi::CString::new("fog_max_dist").unwrap(),
+            40.,
+        );
+
         for (_, chunk) in &self.chunks {
             chunk.render(&self.shader_program, &self.block_renderer);
         }
@@ -381,7 +419,7 @@ pub struct Chunk {
     mesh: Option<ChunkMesh>,
 }
 
-use nalgebra_glm::{vec3, Mat4, Vec3};
+use nalgebra_glm::{vec3, Vec3};
 use noise::*;
 
 impl Chunk {

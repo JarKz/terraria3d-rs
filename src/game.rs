@@ -7,9 +7,12 @@ use player::Player;
 pub mod world;
 use world::World;
 
+use crate::render::aim::Aim;
+
 pub struct Game {
     player: Player,
     world: World,
+    aim: Aim,
 
     timer: sdl2::TimerSubsystem,
     last_frame: u32,
@@ -24,9 +27,11 @@ const DEFAULT_BLOCK_SIZE: f32 = 1.;
 
 impl Game {
     pub fn init(window: &Window) -> Result<Game, String> {
+        let aspect_ratio = window.width() as f32 / window.height() as f32;
         Ok(Game {
-            player: Player::new(window.width() as f32 / window.height() as f32, 45f32, 0.1f32, 100f32),
+            player: Player::new(aspect_ratio, 45f32, 0.1f32, 100f32),
             world: World::new(DEFAULT_SEED, DEFAULT_BLOCK_SIZE),
+            aim: Aim::new(window.width() as f32, window.height() as f32, nalgebra_glm::vec3(1., 1., 1.)),
 
             timer: window.timer()?,
             last_frame: 0,
@@ -36,15 +41,14 @@ impl Game {
 
     pub fn handle(&mut self, event: Event) {
         match event {
-            Event::MouseButtonDown { mouse_btn, .. } => {
-                match mouse_btn {
-                    sdl2::mouse::MouseButton::Left => {
-                        self.world.destroy_block_if_possible(self.player.position(), self.player.view_ray());
-                    },
-                    sdl2::mouse::MouseButton::Right => (),
-                    _ => (),
+            Event::MouseButtonDown { mouse_btn, .. } => match mouse_btn {
+                sdl2::mouse::MouseButton::Left => {
+                    self.world
+                        .destroy_block_if_possible(self.player.position(), self.player.view_ray());
                 }
-            }
+                sdl2::mouse::MouseButton::Right => (),
+                _ => (),
+            },
             Event::KeyDown { keycode, .. } => {
                 if keycode.is_none() {
                     return;
@@ -97,7 +101,8 @@ impl Game {
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
         }
 
-        self.world.render(self.player.projection(), &self.player.look_at());
+        self.world.render(&self.player);
+        self.aim.render();
     }
 
     pub fn new_loop(&mut self) {
