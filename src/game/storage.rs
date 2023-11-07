@@ -35,3 +35,14 @@ impl Storage {
         &self.chunks
     }
 }
+
+#[macro_export]
+macro_rules! lock {
+    ($to_lock:ident) => {{
+        if ($to_lock).is_locked() {
+            use parking_lot::lock_api::RawMutex;
+            unsafe {($to_lock).raw().unlock()}
+        }
+        $to_lock.lock()
+    }}
+}

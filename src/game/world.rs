@@ -5,9 +5,8 @@ use crate::render::{Program, Shader, TextureAtlas, TextureAtlasConfiguration};
 use std::collections::HashMap;
 use std::thread::JoinHandle;
 
-use parking_lot::lock_api::RawMutex;
-
 use super::storage::STORAGE;
+use crate::lock;
 
 const DATA_FILE: &str = "data/test-world.dat";
 
@@ -56,17 +55,11 @@ impl World {
             for z in -radius..=radius {
                 let chunk = Chunk::create(seed, x as f32 * offset, z as f32 * offset);
 
-                if STORAGE.is_locked() {
-                    unsafe {STORAGE.raw().unlock()}
-                }
-                STORAGE.lock().store_chunk(x, z, chunk);
+                lock!(STORAGE).store_chunk(x, z, chunk);
             }
         }
 
-        if STORAGE.is_locked() {
-            unsafe {STORAGE.raw().unlock()}
-        }
-        for (_, chunk) in STORAGE.lock().all_chunks() {
+        for (_, chunk) in lock!(STORAGE).all_chunks() {
             chunk.lock().create_mesh(blocksize);
         }
 
@@ -106,29 +99,18 @@ impl World {
             let xchunk_offset = xyz_normalized.x / Chunk::WIDTH_ISIZE;
             let zchunk_offset = xyz_normalized.z / Chunk::WIDTH_ISIZE;
 
-            if STORAGE.is_locked() {
-                unsafe {STORAGE.raw().unlock()}
-            }
-            if let Some(chunk) = STORAGE.lock().chunk(xchunk_offset, zchunk_offset) {
+            if let Some(chunk) = lock!(STORAGE).chunk(xchunk_offset, zchunk_offset) {
                 let x = shift_negative_block_coord(xyz_normalized.x % Chunk::WIDTH_ISIZE);
                 let y = xyz_normalized.y as usize;
                 let z = shift_negative_block_coord(xyz_normalized.z % Chunk::WIDTH_ISIZE);
 
-                if chunk.is_locked() {
-                    unsafe {chunk.raw().unlock()}
-                }
-
-                let block = &mut chunk.lock().blocks[y][x as usize][z as usize];
+                let block = &mut lock!(chunk).blocks[y][x as usize][z as usize];
                 if Block::is_air(*block) {
                     continue;
                 }
 
                 *block = 0;
-
-                if chunk.is_locked() {
-                    unsafe {chunk.raw().unlock()}
-                }
-                chunk.lock().create_mesh(self.blocksize);
+                lock!(chunk).create_mesh(self.blocksize);
 
                 self.rerender_neighbors(x, y, z, xchunk_offset, zchunk_offset);
                 break;
@@ -145,57 +127,33 @@ impl World {
         zchunk_offset: isize,
     ) {
         if x == 0 {
-            if STORAGE.is_locked() {
-                unsafe {STORAGE.raw().unlock()}
-            }
-            if let Some(chunk) = STORAGE.lock().chunk(xchunk_offset - 1, zchunk_offset) {
-                if chunk.is_locked() {
-                    unsafe {chunk.raw().unlock()}
-                }
-                let block = chunk.lock().blocks[y][Chunk::WIDTH - 1][z as usize];
+            if let Some(chunk) = lock!(STORAGE).chunk(xchunk_offset - 1, zchunk_offset) {
+                let block = lock!(chunk).blocks[y][Chunk::WIDTH - 1][z as usize];
                 if !Block::is_air(block) {
-                    chunk.lock().create_mesh(self.blocksize);
+                    lock!(chunk).create_mesh(self.blocksize);
                 }
             }
         } else if x == Chunk::WIDTH - 1 {
-            if STORAGE.is_locked() {
-                unsafe {STORAGE.raw().unlock()}
-            }
-            if let Some(chunk) = STORAGE.lock().chunk(xchunk_offset + 1, zchunk_offset) {
-                if chunk.is_locked() {
-                    unsafe {chunk.raw().unlock()}
-                }
-                let block = chunk.lock().blocks[y][0][z as usize];
+            if let Some(chunk) = lock!(STORAGE).chunk(xchunk_offset + 1, zchunk_offset) {
+                let block = lock!(chunk).blocks[y][0][z as usize];
                 if !Block::is_air(block) {
-                    chunk.lock().create_mesh(self.blocksize);
+                    lock!(chunk).create_mesh(self.blocksize);
                 }
             }
         }
 
         if z == 0 {
-            if STORAGE.is_locked() {
-                unsafe {STORAGE.raw().unlock()}
-            }
-            if let Some(chunk) = STORAGE.lock().chunk(xchunk_offset, zchunk_offset - 1) {
-                if chunk.is_locked() {
-                    unsafe {chunk.raw().unlock()}
-                }
-                let block = chunk.lock().blocks[y][x as usize][Chunk::WIDTH - 1];
+            if let Some(chunk) = lock!(STORAGE).chunk(xchunk_offset, zchunk_offset - 1) {
+                let block = lock!(chunk).blocks[y][x as usize][Chunk::WIDTH - 1];
                 if !Block::is_air(block) {
-                    chunk.lock().create_mesh(self.blocksize);
+                    lock!(chunk).create_mesh(self.blocksize);
                 }
             }
         } else if z == Chunk::WIDTH - 1 {
-            if STORAGE.is_locked() {
-                unsafe {STORAGE.raw().unlock()}
-            }
-            if let Some(chunk) = STORAGE.lock().chunk(xchunk_offset, zchunk_offset + 1) {
-                if chunk.is_locked() {
-                    unsafe {chunk.raw().unlock()}
-                }
-                let block = chunk.lock().blocks[y][x as usize][0];
+            if let Some(chunk) = lock!(STORAGE).chunk(xchunk_offset, zchunk_offset + 1) {
+                let block = lock!(chunk).blocks[y][x as usize][0];
                 if !Block::is_air(block) {
-                    chunk.lock().create_mesh(self.blocksize);
+                    lock!(chunk).create_mesh(self.blocksize);
                 }
             }
         }
@@ -217,20 +175,13 @@ impl World {
         let offset = self.blocksize * Chunk::WIDTH as f32;
         for x in xmin..=xmax {
             for z in zmin..=zmax {
-
-                if STORAGE.is_locked() {
-                    unsafe {STORAGE.raw().unlock()}
-                }
-                if STORAGE.lock().chunk(x, z).is_none() {
+                if lock!(STORAGE).chunk(x, z).is_none() {
                     let seed = self.seed;
                     self.creating_chunks.push(
                         std::thread::Builder::new()
                             .stack_size(8 * 1024 * 1024)
                             .spawn(move || {
-                                if STORAGE.is_locked() {
-                                    unsafe {STORAGE.raw().unlock()}
-                                }
-                                STORAGE.lock().store_chunk(
+                                lock!(STORAGE).store_chunk(
                                     x,
                                     z,
                                     Chunk::create(seed, x as f32 * offset, z as f32 * offset),
@@ -252,11 +203,8 @@ impl World {
         for x in old_xmin..=old_xmax {
             for z in old_zmin..=old_zmax {
                 if x < xmin || xmax < x || z < zmin || zmax < z {
-                    if STORAGE.is_locked() {
-                        unsafe {STORAGE.raw().unlock()}
-                    }
-                    if let Some(chunk) = STORAGE.lock().chunk(x, z) {
-                        chunk.lock().destroy_mesh();
+                    if let Some(chunk) = lock!(STORAGE).chunk(x, z) {
+                        lock!(chunk).destroy_mesh();
                     }
                 }
             }
@@ -286,20 +234,14 @@ impl World {
 
         let mut counter = 0;
         while let Some((x, z)) = self.to_create_mesh.pop() {
-            if STORAGE.is_locked() {
-                unsafe {STORAGE.raw().unlock()}
-            }
-            if let Some(chunk) = STORAGE.lock().chunk(x, z) {
+            if let Some(chunk) = lock!(STORAGE).chunk(x, z) {
                 let chunk = chunk.clone();
                 let blocksize = self.blocksize;
                 self.rerendering_chunks.push(
                     std::thread::Builder::new()
                         .stack_size(8 * 1024 * 1024)
                         .spawn(move || {
-                            if chunk.is_locked() {
-                                unsafe {chunk.raw().unlock()}
-                            }
-                            chunk.lock().create_mesh(blocksize);
+                            lock!(chunk).create_mesh(blocksize);
                         })
                         .unwrap(),
                 );
@@ -353,10 +295,7 @@ impl World {
         self.shader_program
             .insert_float(&std::ffi::CString::new("fog_max_dist").unwrap(), 40.);
 
-        if STORAGE.is_locked() {
-            unsafe {STORAGE.raw().unlock()}
-        }
-        for (_, chunk) in STORAGE.lock().all_chunks() {
+        for (_, chunk) in lock!(STORAGE).all_chunks() {
             chunk.lock().render(&self.shader_program);
         }
     }
@@ -383,18 +322,12 @@ impl WorldHelper {
         let xchunk_offset = xyz_normalized.x / Chunk::WIDTH_ISIZE;
         let zchunk_offset = xyz_normalized.z / Chunk::WIDTH_ISIZE;
 
-        if STORAGE.is_locked() {
-            unsafe {STORAGE.raw().unlock()}
-        }
-        if let Some(chunk) = STORAGE.lock().chunk(xchunk_offset, zchunk_offset) {
+        if let Some(chunk) = lock!(STORAGE).chunk(xchunk_offset, zchunk_offset) {
             let x = shift_negative_block_coord(xyz_normalized.x % Chunk::WIDTH_ISIZE);
             let y = xyz_normalized.y as usize;
             let z = shift_negative_block_coord(xyz_normalized.z % Chunk::WIDTH_ISIZE);
 
-            if chunk.is_locked() {
-                unsafe { chunk.raw().unlock() }
-            }
-            return Some(chunk.lock().blocks[y][x as usize][z as usize]);
+            return Some(lock!(chunk).blocks[y][x as usize][z as usize]);
         }
         None
     }
