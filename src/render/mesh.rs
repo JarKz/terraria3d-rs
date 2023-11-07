@@ -1,7 +1,8 @@
 use super::{*, block::*};
-use crate::game::world::{Chunk, ChunkBlocks};
+use crate::game::world::{WorldHelper, Chunk, ChunkBlocks};
 
 use nalgebra_glm::*;
+use once_cell::sync::Lazy;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RenderPosition {
@@ -31,7 +32,6 @@ impl ChunkMesh {
         xoffset: f32,
         zoffset: f32,
         blocksize: f32,
-        world: &crate::world::WorldHelper,
     ) -> Self {
         let mut mesh = vec![];
         // let mut offset = vec3(xoffset, 0., zoffset);
@@ -51,7 +51,7 @@ impl ChunkMesh {
 
                     let mut positions = vec![];
                     if x == 0 {
-                        let b = world.get_block_at(&vec3(xoffset - blocksize, offset.y, offset.z));
+                        let b = WorldHelper::get_block_at(&vec3(xoffset - blocksize, offset.y, offset.z), blocksize);
                         if let Some(b) = b {
                             if Self::is_air(b) {
                                 positions.push(RenderPosition::WEST);
@@ -61,7 +61,7 @@ impl ChunkMesh {
                         positions.push(RenderPosition::WEST);
                     }
                     if x + 1 == Chunk::WIDTH {
-                        let b = world.get_block_at(&vec3(offset.x + blocksize, offset.y, offset.z));
+                        let b = WorldHelper::get_block_at(&vec3(offset.x + blocksize, offset.y, offset.z), blocksize);
                         if let Some(b) = b {
                             if Self::is_air(b) {
                                 positions.push(RenderPosition::EAST);
@@ -72,7 +72,7 @@ impl ChunkMesh {
                     }
 
                     if z == 0 {
-                        let b = world.get_block_at(&vec3(offset.x, offset.y, zoffset - blocksize));
+                        let b = WorldHelper::get_block_at(&vec3(offset.x, offset.y, zoffset - blocksize), blocksize);
                         if let Some(b) = b {
                             if Self::is_air(b) {
                                 positions.push(RenderPosition::NORTH);
@@ -82,7 +82,7 @@ impl ChunkMesh {
                         positions.push(RenderPosition::NORTH);
                     }
                     if z + 1 == Chunk::WIDTH {
-                        let b = world.get_block_at(&vec3(offset.x, offset.y, offset.z + blocksize));
+                        let b = WorldHelper::get_block_at(&vec3(offset.x, offset.y, offset.z + blocksize), blocksize);
                         if let Some(b) = b {
                             if Self::is_air(b) {
                                 positions.push(RenderPosition::SOUTH);
@@ -115,12 +115,12 @@ impl ChunkMesh {
         (block & 1) == 0
     }
 
-    pub fn render(&self, shader_program: &super::Program, block_renderer: &BlockRenderer) {
+    pub fn render(&self, shader_program: &super::Program) {
         for block_mesh in &self.mesh {
             shader_program
                 .insert_mat4(&std::ffi::CString::new("model").unwrap(), &block_mesh.model);
             for face in &block_mesh.data {
-                block_renderer.render(*face);
+                BLOCK_RENDERER.render(*face);
             }
         }
     }
@@ -169,6 +169,8 @@ impl Clone for BlockMesh {
         }
     }
 }
+
+static BLOCK_RENDERER: Lazy<BlockRenderer> = Lazy::new(|| BlockRenderer::init());
 
 pub struct BlockRenderer {
     // Corresponding to RenderPosition struct

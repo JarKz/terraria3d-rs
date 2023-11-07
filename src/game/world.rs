@@ -1,10 +1,13 @@
 #![allow(dead_code)]
-use crate::render::{block::Block, mesh::BlockRenderer};
+use crate::render::block::Block;
 use crate::render::{Program, Shader, TextureAtlas, TextureAtlasConfiguration};
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::thread::JoinHandle;
+
+use parking_lot::lock_api::RawMutex;
+
+use super::storage::STORAGE;
 
 const DATA_FILE: &str = "data/test-world.dat";
 
@@ -15,18 +18,12 @@ pub struct World {
     render_center: (isize, isize),
     render_radius_in_chunks: usize,
 
-    creating_chunks: Vec<JoinHandle<((isize, isize), Chunk)>>,
+    creating_chunks: Vec<JoinHandle<()>>,
     to_create_mesh: Vec<(isize, isize)>,
-    rerendering_chunks: Vec<JoinHandle<((isize, isize), Chunk)>>,
-
-    chunks: HashMap<(isize, isize), Chunk>,
-
-    need_reload_wh: bool,
-    world_helper: Arc<WorldHelper>,
+    rerendering_chunks: Vec<JoinHandle<()>>,
 
     texture_atlas: TextureAtlas,
     shader_program: Program,
-    block_renderer: BlockRenderer,
 }
 
 impl World {
@@ -37,7 +34,7 @@ impl World {
 
         let vshader = Shader::from_vertex(String::from("res/shaders/block-vert.glsl")).unwrap();
         let fshader = Shader::from_fragment(String::from("res/shaders/block-frag.glsl")).unwrap();
-        let mut world = Self {
+        let world = Self {
             seed,
             blocksize,
             render_center: (0, 0),
@@ -47,41 +44,32 @@ impl World {
             to_create_mesh: vec![],
             rerendering_chunks: vec![],
 
-            chunks: HashMap::new(),
-
-            need_reload_wh: false,
-            world_helper: Arc::new(WorldHelper {
-                chunks: HashMap::new(),
-                blocksize,
-            }),
-
             texture_atlas: TextureAtlas::from(TextureAtlasConfiguration {
                 image_path: String::from("res/images/block-texture-atlas.png"),
                 square_size: 16,
             }),
             shader_program: Program::from([vshader, fshader]),
-            block_renderer: BlockRenderer::init(),
         };
 
         let radius = world.render_radius_in_chunks as isize;
         for x in -radius..=radius {
             for z in -radius..=radius {
-                // let sum_of_cathetes = x.pow(2) + z.pow(2);
-                // if sum_of_cathetes > radius.pow(2) {
-                //     continue;
-                // }
                 let chunk = Chunk::create(seed, x as f32 * offset, z as f32 * offset);
-                world.chunks.insert((x, z), chunk);
+
+                if STORAGE.is_locked() {
+                    unsafe {STORAGE.raw().unlock()}
+                }
+                STORAGE.lock().store_chunk(x, z, chunk);
             }
         }
 
-        let world_helper = WorldHelper {
-            blocksize: world.blocksize,
-            chunks: world.chunks.clone(),
-        };
-        for (_, chunk) in &mut world.chunks {
-            chunk.create_mesh(&world_helper, blocksize);
+        if STORAGE.is_locked() {
+            unsafe {STORAGE.raw().unlock()}
         }
+        for (_, chunk) in STORAGE.lock().all_chunks() {
+            chunk.lock().create_mesh(blocksize);
+        }
+
         // write_to_file(
         //     String::from(DATA_FILE),
         //     // String::from("Test-world"),
@@ -95,11 +83,6 @@ impl World {
     const RAY_DISTANCE: usize = 100;
     const DISTANCE: f32 = 0.4f32;
     pub fn destroy_block_if_possible(&mut self, player_position: &Vec3, view_ray: &Vec3) {
-        let world_helper = WorldHelper {
-            chunks: self.chunks.clone(),
-            blocksize: self.blocksize,
-        };
-
         for i in 0..Self::RAY_DISTANCE {
             let player_looking_to = player_position + view_ray * i as f32 * Self::DISTANCE;
             let mut xyz_normalized = player_looking_to / self.blocksize;
@@ -123,18 +106,29 @@ impl World {
             let xchunk_offset = xyz_normalized.x / Chunk::WIDTH_ISIZE;
             let zchunk_offset = xyz_normalized.z / Chunk::WIDTH_ISIZE;
 
-            if let Some(chunk) = self.chunks.get_mut(&(xchunk_offset, zchunk_offset)) {
+            if STORAGE.is_locked() {
+                unsafe {STORAGE.raw().unlock()}
+            }
+            if let Some(chunk) = STORAGE.lock().chunk(xchunk_offset, zchunk_offset) {
                 let x = shift_negative_block_coord(xyz_normalized.x % Chunk::WIDTH_ISIZE);
                 let y = xyz_normalized.y as usize;
                 let z = shift_negative_block_coord(xyz_normalized.z % Chunk::WIDTH_ISIZE);
 
-                let block = &mut chunk.blocks[y][x as usize][z as usize];
+                if chunk.is_locked() {
+                    unsafe {chunk.raw().unlock()}
+                }
+
+                let block = &mut chunk.lock().blocks[y][x as usize][z as usize];
                 if Block::is_air(*block) {
                     continue;
                 }
 
                 *block = 0;
-                chunk.create_mesh(&world_helper, self.blocksize);
+
+                if chunk.is_locked() {
+                    unsafe {chunk.raw().unlock()}
+                }
+                chunk.lock().create_mesh(self.blocksize);
 
                 self.rerender_neighbors(x, y, z, xchunk_offset, zchunk_offset);
                 break;
@@ -150,42 +144,58 @@ impl World {
         xchunk_offset: isize,
         zchunk_offset: isize,
     ) {
-        let mut world_helper = WorldHelper {
-            chunks: self.chunks.clone(),
-            blocksize: self.blocksize,
-        };
         if x == 0 {
-            if let Some(chunk) = self.chunks.get_mut(&(xchunk_offset - 1, zchunk_offset)) {
-                let block = chunk.blocks[y][Chunk::WIDTH - 1][z as usize];
+            if STORAGE.is_locked() {
+                unsafe {STORAGE.raw().unlock()}
+            }
+            if let Some(chunk) = STORAGE.lock().chunk(xchunk_offset - 1, zchunk_offset) {
+                if chunk.is_locked() {
+                    unsafe {chunk.raw().unlock()}
+                }
+                let block = chunk.lock().blocks[y][Chunk::WIDTH - 1][z as usize];
                 if !Block::is_air(block) {
-                    chunk.create_mesh(&world_helper, self.blocksize);
-                    world_helper.chunks = self.chunks.clone();
+                    chunk.lock().create_mesh(self.blocksize);
                 }
             }
         } else if x == Chunk::WIDTH - 1 {
-            if let Some(chunk) = self.chunks.get_mut(&(xchunk_offset + 1, zchunk_offset)) {
-                let block = chunk.blocks[y][0][z as usize];
+            if STORAGE.is_locked() {
+                unsafe {STORAGE.raw().unlock()}
+            }
+            if let Some(chunk) = STORAGE.lock().chunk(xchunk_offset + 1, zchunk_offset) {
+                if chunk.is_locked() {
+                    unsafe {chunk.raw().unlock()}
+                }
+                let block = chunk.lock().blocks[y][0][z as usize];
                 if !Block::is_air(block) {
-                    chunk.create_mesh(&world_helper, self.blocksize);
-                    world_helper.chunks = self.chunks.clone();
+                    chunk.lock().create_mesh(self.blocksize);
                 }
             }
         }
 
         if z == 0 {
-            if let Some(chunk) = self.chunks.get_mut(&(xchunk_offset, zchunk_offset - 1)) {
-                let block = chunk.blocks[y][x as usize][Chunk::WIDTH - 1];
+            if STORAGE.is_locked() {
+                unsafe {STORAGE.raw().unlock()}
+            }
+            if let Some(chunk) = STORAGE.lock().chunk(xchunk_offset, zchunk_offset - 1) {
+                if chunk.is_locked() {
+                    unsafe {chunk.raw().unlock()}
+                }
+                let block = chunk.lock().blocks[y][x as usize][Chunk::WIDTH - 1];
                 if !Block::is_air(block) {
-                    chunk.create_mesh(&world_helper, self.blocksize);
-                    world_helper.chunks = self.chunks.clone();
+                    chunk.lock().create_mesh(self.blocksize);
                 }
             }
         } else if z == Chunk::WIDTH - 1 {
-            if let Some(chunk) = self.chunks.get_mut(&(xchunk_offset, zchunk_offset + 1)) {
-                let block = chunk.blocks[y][x as usize][0];
+            if STORAGE.is_locked() {
+                unsafe {STORAGE.raw().unlock()}
+            }
+            if let Some(chunk) = STORAGE.lock().chunk(xchunk_offset, zchunk_offset + 1) {
+                if chunk.is_locked() {
+                    unsafe {chunk.raw().unlock()}
+                }
+                let block = chunk.lock().blocks[y][x as usize][0];
                 if !Block::is_air(block) {
-                    chunk.create_mesh(&world_helper, self.blocksize);
-                    world_helper.chunks = self.chunks.clone();
+                    chunk.lock().create_mesh(self.blocksize);
                 }
             }
         }
@@ -207,20 +217,24 @@ impl World {
         let offset = self.blocksize * Chunk::WIDTH as f32;
         for x in xmin..=xmax {
             for z in zmin..=zmax {
-                // let sum_of_cathetes = (x - xplayer_pos).pow(2) + (z - zplayer_pos).pow(2);
-                // if sum_of_cathetes > radius.pow(2) {
-                //     continue;
-                // }
 
-                if self.chunks.get(&(x, z)).is_none() {
+                if STORAGE.is_locked() {
+                    unsafe {STORAGE.raw().unlock()}
+                }
+                if STORAGE.lock().chunk(x, z).is_none() {
                     let seed = self.seed;
                     self.creating_chunks.push(
                         std::thread::Builder::new()
                             .stack_size(8 * 1024 * 1024)
                             .spawn(move || {
-                                let new_chunk =
-                                    Chunk::create(seed, x as f32 * offset, z as f32 * offset);
-                                ((x, z), new_chunk)
+                                if STORAGE.is_locked() {
+                                    unsafe {STORAGE.raw().unlock()}
+                                }
+                                STORAGE.lock().store_chunk(
+                                    x,
+                                    z,
+                                    Chunk::create(seed, x as f32 * offset, z as f32 * offset),
+                                );
                             })
                             .unwrap(),
                     );
@@ -228,7 +242,6 @@ impl World {
                 self.to_create_mesh.push((x, z));
             }
         }
-        self.need_reload_wh = true;
 
         let (xcenter, zcenter) = self.render_center;
         let old_xmin = xcenter - radius;
@@ -239,8 +252,11 @@ impl World {
         for x in old_xmin..=old_xmax {
             for z in old_zmin..=old_zmax {
                 if x < xmin || xmax < x || z < zmin || zmax < z {
-                    if let Some(chunk) = self.chunks.get_mut(&(x, z)) {
-                        chunk.destroy_mesh();
+                    if STORAGE.is_locked() {
+                        unsafe {STORAGE.raw().unlock()}
+                    }
+                    if let Some(chunk) = STORAGE.lock().chunk(x, z) {
+                        chunk.lock().destroy_mesh();
                     }
                 }
             }
@@ -261,36 +277,29 @@ impl World {
         }
 
         for i in indices.iter().rev() {
-            let t = self.creating_chunks.remove(*i);
-            let ((x, z), chunk) = t.join().unwrap();
-            self.chunks.insert((x, z), chunk);
+            self.creating_chunks.remove(*i);
         }
 
         if indices.len() > 0 || self.creating_chunks.len() > 0 {
             return;
         }
 
-        if self.need_reload_wh {
-            self.world_helper = Arc::new(WorldHelper {
-                blocksize: self.blocksize,
-                chunks: self.chunks.clone(),
-            });
-            self.need_reload_wh = false;
-            return;
-        }
-
         let mut counter = 0;
         while let Some((x, z)) = self.to_create_mesh.pop() {
-            if let Some(chunk) = self.chunks.get(&(x, z)) {
-                let mut chunk = chunk.clone();
+            if STORAGE.is_locked() {
+                unsafe {STORAGE.raw().unlock()}
+            }
+            if let Some(chunk) = STORAGE.lock().chunk(x, z) {
+                let chunk = chunk.clone();
                 let blocksize = self.blocksize;
-                let world_helper = self.world_helper.clone();
                 self.rerendering_chunks.push(
                     std::thread::Builder::new()
                         .stack_size(8 * 1024 * 1024)
                         .spawn(move || {
-                            chunk.create_mesh(&world_helper, blocksize);
-                            ((x, z), chunk)
+                            if chunk.is_locked() {
+                                unsafe {chunk.raw().unlock()}
+                            }
+                            chunk.lock().create_mesh(blocksize);
                         })
                         .unwrap(),
                 );
@@ -315,9 +324,7 @@ impl World {
             }
         }
         for i in indices.into_iter().rev() {
-            let t = self.rerendering_chunks.remove(i);
-            let ((x, z), chunk) = t.join().unwrap();
-            self.chunks.insert((x, z), chunk);
+            self.rerendering_chunks.remove(i);
         }
     }
 
@@ -341,17 +348,16 @@ impl World {
             &vec3(0.3, 0.3, 0.5),
         );
 
-        self.shader_program.insert_float(
-            &std::ffi::CString::new("fog_min_dist").unwrap(),
-            35.,
-        );
-        self.shader_program.insert_float(
-            &std::ffi::CString::new("fog_max_dist").unwrap(),
-            40.,
-        );
+        self.shader_program
+            .insert_float(&std::ffi::CString::new("fog_min_dist").unwrap(), 35.);
+        self.shader_program
+            .insert_float(&std::ffi::CString::new("fog_max_dist").unwrap(), 40.);
 
-        for (_, chunk) in &self.chunks {
-            chunk.render(&self.shader_program, &self.block_renderer);
+        if STORAGE.is_locked() {
+            unsafe {STORAGE.raw().unlock()}
+        }
+        for (_, chunk) in STORAGE.lock().all_chunks() {
+            chunk.lock().render(&self.shader_program);
         }
     }
 }
@@ -362,8 +368,8 @@ pub struct WorldHelper {
 }
 
 impl WorldHelper {
-    pub fn get_block_at(&self, xyz: &Vec3) -> Option<u64> {
-        let mut xyz_normalized = xyz / self.blocksize;
+    pub fn get_block_at(xyz: &Vec3, blocksize: f32) -> Option<u64> {
+        let mut xyz_normalized = xyz / blocksize;
 
         xyz_normalized.x = shift_negative_coord(xyz_normalized.x);
         xyz_normalized.z = shift_negative_coord(xyz_normalized.z);
@@ -376,12 +382,19 @@ impl WorldHelper {
 
         let xchunk_offset = xyz_normalized.x / Chunk::WIDTH_ISIZE;
         let zchunk_offset = xyz_normalized.z / Chunk::WIDTH_ISIZE;
-        if let Some(chunk) = self.chunks.get(&(xchunk_offset, zchunk_offset)) {
+
+        if STORAGE.is_locked() {
+            unsafe {STORAGE.raw().unlock()}
+        }
+        if let Some(chunk) = STORAGE.lock().chunk(xchunk_offset, zchunk_offset) {
             let x = shift_negative_block_coord(xyz_normalized.x % Chunk::WIDTH_ISIZE);
             let y = xyz_normalized.y as usize;
             let z = shift_negative_block_coord(xyz_normalized.z % Chunk::WIDTH_ISIZE);
 
-            return Some(chunk.blocks[y][x as usize][z as usize]);
+            if chunk.is_locked() {
+                unsafe { chunk.raw().unlock() }
+            }
+            return Some(chunk.lock().blocks[y][x as usize][z as usize]);
         }
         None
     }
@@ -474,13 +487,12 @@ impl Chunk {
         &self.blocks
     }
 
-    fn create_mesh(&mut self, world: &WorldHelper, blocksize: f32) {
+    fn create_mesh(&mut self, blocksize: f32) {
         self.mesh = Some(ChunkMesh::new(
             &self.blocks,
             self.xoffset,
             self.zoffset,
             blocksize,
-            world,
         ));
     }
 
@@ -488,9 +500,9 @@ impl Chunk {
         self.mesh = None;
     }
 
-    fn render(&self, shader_program: &Program, block_rendrer: &BlockRenderer) {
+    fn render(&self, shader_program: &Program) {
         if let Some(mesh) = &self.mesh {
-            mesh.render(shader_program, block_rendrer);
+            mesh.render(shader_program);
         }
     }
 }

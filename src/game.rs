@@ -7,6 +7,8 @@ use player::Player;
 pub mod world;
 use world::World;
 
+pub mod storage;
+
 use crate::render::aim::Aim;
 
 pub struct Game {
