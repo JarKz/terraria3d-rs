@@ -17,11 +17,16 @@ use crate::lock;
 const DATA_FILE: &str = "data/test-world.dat";
 
 macro_rules! foreach_in_radius {
-    (($x:ident, $z:ident; $xcenter:ident, $zcenter:ident; $radius:ident) $body:expr) => {
+    (($x:ident, $z:ident; $xcenter:ident, $zcenter:ident; $radius:ident) {$body:expr}) => {
         for $x in ($xcenter - $radius)..=($xcenter + $radius) {
             for $z in ($zcenter - $radius)..=($zcenter + $radius) {
                 $body
             }
+        }
+    };
+    (($x:ident, $y:ident, $z:ident; $xcenter:ident, $ycenter:ident, $zcenter:ident; $radius:ident) {$body:expr}) => {
+        for $y in ($ycenter - $radius).max(0)..=($ycenter + $radius).min(crate::game::world::chunk::Chunk::HEIGHT) {
+            foreach_in_radius!(($x, $z; $xcenter, $zcenter; $radius) {$body});
         }
     };
 }
@@ -133,6 +138,10 @@ impl World {
     const RAY_DISTANCE: usize = 100;
     const DISTANCE: f32 = 0.4f32;
     pub fn destroy_block_if_possible(&mut self, player_position: &Vec3, view_ray: &Vec3) {
+        // block_start <= player_position + view_ray * x <= block_end
+        // block_start - player_position <= view_ray * x <= block_end - player_position
+        // (block_start - player_position) / view_ray <= x <= (block_end - player_position) /
+        // view_ray
         for i in 0..Self::RAY_DISTANCE {
             let player_looking_to = player_position + view_ray * i as f32 * Self::DISTANCE;
             let mut xyz_normalized = player_looking_to / self.blocksize;
@@ -287,7 +296,6 @@ impl World {
                 if (x - xplayer_pos).abs() > radius || (z - zplayer_pos).abs() > radius {
                     STORAGE.lock().destroy_mesh(x, z);
                 }
-
             }
         };
         self.render_center = (xplayer_pos, zplayer_pos);
@@ -307,10 +315,6 @@ impl World {
 
         for i in indices.iter().rev() {
             self.threads.remove(*i);
-        }
-
-        if indices.len() > 0 || self.threads.len() > 0 {
-            return;
         }
     }
 
