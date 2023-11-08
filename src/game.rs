@@ -31,7 +31,7 @@ impl Game {
     pub fn init(window: &Window) -> Result<Game, String> {
         let aspect_ratio = window.width() as f32 / window.height() as f32;
         Ok(Game {
-            player: Player::new(aspect_ratio, 45f32, 0.1f32, 100f32),
+            player: Player::new(aspect_ratio, 45f32, 0.1f32, 200f32),
             world: World::new(DEFAULT_SEED, DEFAULT_BLOCK_SIZE),
             aim: Aim::new(window.width() as f32, window.height() as f32, nalgebra_glm::vec3(1., 1., 1.)),
 

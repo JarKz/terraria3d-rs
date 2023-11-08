@@ -1,8 +1,13 @@
-use super::{*, block::*};
-use crate::game::world::{WorldHelper, Chunk, ChunkBlocks};
+use super::{block::*, *};
+use crate::game::world::{
+    chunk::{Chunk, ChunkBlocks},
+    WorldHelper,
+};
 
 use nalgebra_glm::*;
 use once_cell::sync::Lazy;
+
+use crate::foreach_block;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RenderPosition {
@@ -27,92 +32,81 @@ pub struct ChunkMesh {
 }
 
 impl ChunkMesh {
-    pub fn new(
-        blocks: &ChunkBlocks,
-        xoffset: f32,
-        zoffset: f32,
-        blocksize: f32,
-    ) -> Self {
+    pub fn new(blocks: &ChunkBlocks, xoffset: f32, zoffset: f32, blocksize: f32) -> Self {
         let mut mesh = vec![];
-        // let mut offset = vec3(xoffset, 0., zoffset);
 
-        // TODO: It's temporary for increasing performance! In future must be valid logic!
-        let mut offset = vec3(xoffset, blocksize, zoffset);
-        for y in 1..Chunk::HEIGHT {
-            offset = vec3(xoffset, offset.y, zoffset);
-            for x in 0..Chunk::WIDTH {
-                offset.z = zoffset;
-                for z in 0..Chunk::WIDTH {
-                    let block = blocks[y][x][z];
-                    if Self::is_air(block) {
-                        offset.z += blocksize;
-                        continue;
-                    }
+        let mut offset = vec3(xoffset, 0.0, zoffset);
+        foreach_block! {
+            (y, offset = vec3(xoffset, offset.y + blocksize, zoffset);
+            x, offset = vec3(offset.x + blocksize, offset.y, zoffset);
+            z, offset.z += blocksize) {
+                let block = blocks[y][x][z];
+                if Block::is_air(block) {
+                    offset.z += blocksize;
+                    continue;
+                }
 
-                    let mut positions = vec![];
-                    if x == 0 {
-                        let b = WorldHelper::get_block_at(&vec3(xoffset - blocksize, offset.y, offset.z), blocksize);
-                        if let Some(b) = b {
-                            if Self::is_air(b) {
-                                positions.push(RenderPosition::WEST);
-                            }
-                        }
-                    } else if Self::is_air(blocks[y][x - 1][z]) {
+                let mut positions = vec![];
+                if x == 0 {
+                    let b = WorldHelper::get_block_at(
+                        &vec3(xoffset - blocksize, offset.y, offset.z),
+                        blocksize,
+                    );
+                    if Block::is_air(b) {
                         positions.push(RenderPosition::WEST);
                     }
-                    if x + 1 == Chunk::WIDTH {
-                        let b = WorldHelper::get_block_at(&vec3(offset.x + blocksize, offset.y, offset.z), blocksize);
-                        if let Some(b) = b {
-                            if Self::is_air(b) {
-                                positions.push(RenderPosition::EAST);
-                            }
-                        }
-                    } else if Self::is_air(blocks[y][x + 1][z]) {
+                } else if Block::is_air(blocks[y][x - 1][z]) {
+                    positions.push(RenderPosition::WEST);
+                }
+                if x + 1 == Chunk::WIDTH {
+                    let b = WorldHelper::get_block_at(
+                        &vec3(offset.x + blocksize, offset.y, offset.z),
+                        blocksize,
+                    );
+                    if Block::is_air(b) {
                         positions.push(RenderPosition::EAST);
                     }
+                } else if Block::is_air(blocks[y][x + 1][z]) {
+                    positions.push(RenderPosition::EAST);
+                }
 
-                    if z == 0 {
-                        let b = WorldHelper::get_block_at(&vec3(offset.x, offset.y, zoffset - blocksize), blocksize);
-                        if let Some(b) = b {
-                            if Self::is_air(b) {
-                                positions.push(RenderPosition::NORTH);
-                            }
-                        }
-                    } else if Self::is_air(blocks[y][x][z - 1]) {
+                if z == 0 {
+                    let b = WorldHelper::get_block_at(
+                        &vec3(offset.x, offset.y, zoffset - blocksize),
+                        blocksize,
+                    );
+                    if Block::is_air(b) {
                         positions.push(RenderPosition::NORTH);
                     }
-                    if z + 1 == Chunk::WIDTH {
-                        let b = WorldHelper::get_block_at(&vec3(offset.x, offset.y, offset.z + blocksize), blocksize);
-                        if let Some(b) = b {
-                            if Self::is_air(b) {
-                                positions.push(RenderPosition::SOUTH);
-                            }
-                        }
-                    } else if Self::is_air(blocks[y][x][z + 1]) {
+                } else if Block::is_air(blocks[y][x][z - 1]) {
+                    positions.push(RenderPosition::NORTH);
+                }
+                if z + 1 == Chunk::WIDTH {
+                    let b = WorldHelper::get_block_at(
+                        &vec3(offset.x, offset.y, offset.z + blocksize),
+                        blocksize,
+                    );
+                    if Block::is_air(b) {
                         positions.push(RenderPosition::SOUTH);
                     }
-
-                    if y == 0 || Self::is_air(blocks[y - 1][x][z]) {
-                        positions.push(RenderPosition::BOTTOM);
-                    }
-                    if y + 1 == Chunk::HEIGHT || Self::is_air(blocks[y + 1][x][z]) {
-                        positions.push(RenderPosition::TOP);
-                    }
-
-                    if positions.len() > 0 {
-                        mesh.push(BlockMesh::new(block, &offset, positions));
-                    }
-                    offset.z += blocksize;
+                } else if Block::is_air(blocks[y][x][z + 1]) {
+                    positions.push(RenderPosition::SOUTH);
                 }
-                offset.x += blocksize;
-            }
-            offset.y += blocksize;
-        }
-        Self { mesh, blocksize }
-    }
 
-    fn is_air(block: u64) -> bool {
-        (block & 1) == 0
+                // TODO: It's temporary for increasing performance! In future must be valid logic!
+                if y > 0 && Block::is_air(blocks[y - 1][x][z]) {
+                    positions.push(RenderPosition::BOTTOM);
+                }
+                if y + 1 == Chunk::HEIGHT || Block::is_air(blocks[y + 1][x][z]) {
+                    positions.push(RenderPosition::TOP);
+                }
+
+                if positions.len() > 0 {
+                    mesh.push(BlockMesh::new(block, &offset, positions));
+                }
+        }};
+
+        Self { mesh, blocksize }
     }
 
     pub fn render(&self, shader_program: &super::Program) {
