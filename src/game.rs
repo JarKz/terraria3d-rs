@@ -33,7 +33,11 @@ impl Game {
         Ok(Game {
             player: Player::new(aspect_ratio, 45f32, 0.1f32, 200f32),
             world: World::new(DEFAULT_SEED, DEFAULT_BLOCK_SIZE),
-            aim: Aim::new(window.width() as f32, window.height() as f32, nalgebra_glm::vec3(1., 1., 1.)),
+            aim: Aim::new(
+                window.width() as f32,
+                window.height() as f32,
+                nalgebra_glm::vec3(1., 1., 1.),
+            ),
 
             timer: window.timer()?,
             last_frame: 0,
@@ -44,11 +48,12 @@ impl Game {
     pub fn handle(&mut self, event: Event) {
         match event {
             Event::MouseButtonDown { mouse_btn, .. } => match mouse_btn {
-                sdl2::mouse::MouseButton::Left => {
-                    self.world
-                        .destroy_block_if_possible(self.player.position(), self.player.view_ray());
-                }
-                sdl2::mouse::MouseButton::Right => (),
+                sdl2::mouse::MouseButton::Left => self
+                    .world
+                    .destroy_block_if_possible(self.player.position(), self.player.view_ray()),
+                sdl2::mouse::MouseButton::Right => self
+                    .world
+                    .place_block_if_possible(self.player.position(), self.player.view_ray()),
                 _ => (),
             },
             Event::KeyDown { keycode, .. } => {
@@ -79,10 +84,9 @@ impl Game {
                     _ => (),
                 }
             }
-            Event::MouseMotion { xrel, yrel, .. } => {
-                self.player
-                    .rotate_camera_by_offsets(xrel as f32, yrel as f32);
-            }
+            Event::MouseMotion { xrel, yrel, .. } => self
+                .player
+                .rotate_camera_by_offsets(xrel as f32, yrel as f32),
             _ => (),
         }
     }

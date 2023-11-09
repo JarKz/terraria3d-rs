@@ -85,6 +85,7 @@ impl World {
     //TODO:
     //This generation is temporary, need in future change to normal generation!
     pub fn new(seed: u32, blocksize: f32) -> Self {
+        #[allow(unused_assignments)]
         let mut render_radius_in_chunks = 8;
         #[cfg(target_os = "macos")]
         {
@@ -145,42 +146,16 @@ impl World {
         }
     }
 
-    const RAY_DISTANCE: usize = 100;
-    const DISTANCE: f32 = 0.4f32;
     pub fn destroy_block_if_possible(&mut self, player_position: &Vec3, view_ray: &Vec3) {
-        let xcenter = player_position.x.floor() as isize;
-        let ycenter = player_position.y.floor() as isize;
-        let zcenter = player_position.z.floor() as isize;
-        let radius = self.player_distance_to_block as isize;
-
-        let mut coord: Option<(usize, usize, usize, isize, isize)> = None;
-        let mut distance = f32::MAX;
-        foreach_in_radius!(
-            (x, y, z; xcenter, ycenter, zcenter; radius) {
-                let (tmin, tmax) = self.get_t_values_ray_intersection(x, y, z, player_position, view_ray);
-                if tmax < 0.0 || tmin > tmax {
-                    continue;
-                }
-
-                let mut block_position = vec3(x as f32, y as f32, z as f32);
-                get_block_position!((xblock, yblock, zblock, xoffset, zoffset) <= block_position);
-                if let Some(chunk) = STORAGE.lock().chunk(xoffset, zoffset) {
-                    let chunk = chunk.lock();
-                    let block = chunk.block_at(xblock, zblock, yblock);
-                    if Block::is_air(block) {
-                        continue;
-                    }
-
-                    let dist_to_block = self.calculate_intersection_distance(player_position, view_ray, tmin);
-                    if dist_to_block < distance {
-                        distance = dist_to_block;
-                        coord = Some((xblock, yblock, zblock, xoffset, zoffset));
-                    }
-                }
-            }
-        );
-
-        if let Some((x, y, z, xoffset, zoffset)) = coord {
+        if let Some(CoordinateInSpace {
+            x,
+            y,
+            z,
+            xoffset,
+            zoffset,
+            ..
+        }) = self.find_nearest_block_in_ray(player_position, view_ray)
+        {
             if let Some(chunk) = STORAGE.lock().chunk(xoffset, zoffset) {
                 let mut chunk = chunk.lock();
                 let block = chunk.mut_block_at(x, z, y);
@@ -201,7 +176,140 @@ impl World {
         }
     }
 
-    fn get_t_values_ray_intersection(&self, x: isize, y: isize, z: isize, origin: &Vec3, direction: &Vec3) -> (f32, f32) {
+    pub fn place_block_if_possible(&mut self, player_position: &Vec3, view_ray: &Vec3) {
+        if let Some(CoordinateInSpace {
+            mut x,
+            mut y,
+            mut z,
+            mut xoffset,
+            mut zoffset,
+            intersection_point,
+        }) = self.find_nearest_block_in_ray(player_position, view_ray)
+        {
+            let block_pos = vec3(
+                x as f32 + (xoffset * Chunk::WIDTH_ISIZE) as f32,
+                y as f32,
+                z as f32 + (zoffset * Chunk::WIDTH_ISIZE) as f32,
+            );
+            let diff = intersection_point - block_pos;
+            macro_rules! shift_to_need_axis {
+                ($diff:ident, $axis:ident, $axisoffset:ident, $max:expr) => {
+                    if $diff.$axis == 1.0 {
+                        if $axis + 1 == $max {
+                            $axisoffset += 1;
+                            $axis = 0;
+                        } else {
+                            $axis += 1;
+                        }
+                    } else if $diff.$axis == 0.0 {
+                        if $axis == 0 {
+                            $axisoffset -= 1;
+                            $axis = $max - 1;
+                        } else {
+                            $axis -= 1;
+                        }
+                    }
+                };
+                ($diff:ident, $axis:ident, $max:expr) => {
+                    let mut _stub = 0;
+                    shift_to_need_axis!($diff, $axis, _stub, $max);
+                };
+            }
+            shift_to_need_axis!(diff, x, xoffset, Chunk::WIDTH);
+            shift_to_need_axis!(diff, z, zoffset, Chunk::WIDTH);
+            shift_to_need_axis!(diff, y, Chunk::HEIGHT);
+
+            // TODO:
+            // Need to define normal collision of player and block
+            //
+            // let dist = vec3(
+            //     ((x as f32 + (xoffset * Chunk::WIDTH_ISIZE) as f32) - player_position.x)
+            //         .abs(),
+            //     (y as f32) - player_position.y.floor(),
+            //     ((z as f32 + (zoffset * Chunk::WIDTH_ISIZE) as f32) - player_position.z)
+            //         .abs(),
+            // );
+            // if (dist.x / self.blocksize < self.blocksize && dist.z / self.blocksize < self.blocksize)
+            //     && ((dist.y < 0.0 && dist.y.abs() / (self.blocksize * 2.0) < 1.0)
+            //         || (dist.y >= 0.0 && dist.y / self.blocksize < 1.0))
+            // {
+            //     return;
+            // }
+
+            if let Some(chunk) = STORAGE.lock().chunk(xoffset, zoffset) {
+                let mut chunk = chunk.lock();
+                let block = chunk.mut_block_at(x, z, y);
+
+                if !Block::is_air(*block) {
+                    return;
+                }
+
+                *block = 1;
+                lock!(STORAGE).update_mesh(
+                    xoffset,
+                    zoffset,
+                    ChunkMesh::new(
+                        chunk.blocks(),
+                        chunk.xoffset(),
+                        chunk.zoffset(),
+                        self.blocksize,
+                    ),
+                );
+                self.rerender_neighbors(x, y, z, xoffset, zoffset);
+            }
+        }
+    }
+
+    fn find_nearest_block_in_ray(
+        &self,
+        player_position: &Vec3,
+        view_ray: &Vec3,
+    ) -> Option<CoordinateInSpace> {
+        let xcenter = player_position.x.floor() as isize;
+        let ycenter = player_position.y.floor() as isize;
+        let zcenter = player_position.z.floor() as isize;
+        let radius = self.player_distance_to_block as isize;
+
+        let mut coord: Option<CoordinateInSpace> = None;
+        let mut distance = f32::MAX;
+        foreach_in_radius! {
+            (x, y, z; xcenter, ycenter, zcenter; radius) {
+                let (tmin, tmax) = self.get_t_values_ray_intersection(x, y, z, player_position, view_ray);
+                if tmax < 0.0 || tmin > tmax {
+                    continue;
+                }
+
+                let mut block_position = vec3(x as f32, y as f32, z as f32);
+                get_block_position!((xblock, yblock, zblock, xoffset, zoffset) <= block_position);
+                if let Some(chunk) = STORAGE.lock().chunk(xoffset, zoffset) {
+                    let chunk = chunk.lock();
+                    let block = chunk.block_at(xblock, zblock, yblock);
+                    if Block::is_air(block) {
+                        continue;
+                    }
+
+                    let intersection_point = player_position + view_ray * tmin;
+                    let dist_to_block = player_position.metric_distance(&intersection_point);
+                    if dist_to_block < distance {
+                        distance = dist_to_block;
+                        coord = Some(CoordinateInSpace{
+                            x: xblock, y: yblock, z: zblock, xoffset, zoffset, intersection_point}
+                            );
+                    }
+                }
+            }
+        };
+        coord
+    }
+
+    fn get_t_values_ray_intersection(
+        &self,
+        x: isize,
+        y: isize,
+        z: isize,
+        origin: &Vec3,
+        direction: &Vec3,
+    ) -> (f32, f32) {
         let block_start = vec3(x as f32, y as f32, z as f32);
         let block_end = block_start.add_scalar(self.blocksize);
         let mut min = block_start - origin;
@@ -216,11 +324,6 @@ impl World {
         let tmin = min.x.min(max.x).max(min.y.min(max.y)).max(min.z.min(max.z));
         let tmax = min.x.max(max.x).min(min.y.max(max.y)).min(min.z.max(max.z));
         (tmin, tmax)
-    }
-
-    fn calculate_intersection_distance(&self, from: &Vec3, direction: &Vec3, tmin_value: f32) -> f32 {
-        let intersection_point = from + direction * tmin_value;
-        from.metric_distance(&intersection_point)
     }
 
     fn rerender_neighbors(&mut self, x: usize, y: usize, z: usize, xoffset: isize, zoffset: isize) {
@@ -411,6 +514,15 @@ impl WorldHelper {
             Chunk::anticipated_block_at(x, z, y, xoffset as f32 * offset, zoffset as f32 * offset)
         }
     }
+}
+
+struct CoordinateInSpace {
+    x: usize,
+    y: usize,
+    z: usize,
+    xoffset: isize,
+    zoffset: isize,
+    intersection_point: Vec3,
 }
 
 fn shift_negative_block_coord(mut coord: isize) -> usize {
