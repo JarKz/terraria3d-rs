@@ -17,6 +17,8 @@ pub struct Player {
     up: Vec3,
     norm_up: Vec3,
 
+    hitbox: Hitbox,
+
     pitch: f32,
     yaw: f32,
 
@@ -35,20 +37,34 @@ impl Player {
     const DEFAULT_MAX_UP_ROTATION: f32 = 89.0;
     const DEFAULT_MAX_DOWN_ROTATION: f32 = -89.0;
 
+    const DEFAULT_HITBOX: Hitbox = Hitbox {
+        data: [
+            Vec3::new(0.5, 0.5, -0.5),
+            Vec3::new(-0.5, 0.5, -0.5),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec3::new(-0.5, 0.5, 0.5),
+            Vec3::new(0.5, -1.5, -0.5),
+            Vec3::new(-0.5, -1.5, -0.5),
+            Vec3::new(0.5, -1.5, 0.5),
+            Vec3::new(-0.5, -1.5, 0.5),
+        ],
+    };
+
     pub fn new(aspect: f32, fovy: f32, near: f32, far: f32) -> Self {
         Player {
             projection: perspective(aspect, fovy, near, far),
-            //TODO:
-            //CHANGE IT IN FUTURE TO NORMAL POSITION
-            position: vec3(0.0, 100.0, 0.0),
+            position: vec3(0.0, 0.0, 0.0),
             target: vec3(0.0, 0.0, -1.0),
             up: vec3(0.0, 1.0, 0.0),
+            norm_up: vec3(0.0, 1.0, 0.0),
+
+            hitbox: Self::DEFAULT_HITBOX.clone(),
+
             pitch: Self::DEFAULT_PITCH,
             yaw: Self::DEFAULT_YAW,
             sensitivity: Self::DEFAULT_SENSITIVITY,
             velocity: Self::DEFAULT_VELOCITY,
 
-            norm_up: vec3(0.0, 1.0, 0.0),
             move_direction: PlayerMove {
                 forward: false,
                 backward: false,
@@ -116,27 +132,34 @@ impl Player {
         self.move_direction.down = false;
     }
 
-    pub fn process_move(&mut self, delta_time: f32) {
+    pub fn process_move(&mut self, new_position: Vec3) {
+        self.position = new_position;
+    }
+
+    pub fn get_new_position(&self, delta_time: f32) -> Vec3 {
         let direction = &self.move_direction;
         let offset = delta_time * self.velocity;
+        let mut new_position = self.position.clone();
         if direction.forward {
-            self.position += offset * normalize(&vec3(self.target.x, 0.0, self.target.z));
+            new_position += offset * normalize(&vec3(self.target.x, 0.0, self.target.z));
         }
         if direction.backward {
-            self.position -= offset * normalize(&vec3(self.target.x, 0.0, self.target.z));
+            new_position -= offset * normalize(&vec3(self.target.x, 0.0, self.target.z));
         }
         if direction.left {
-            self.position -= offset * normalize(&cross(&self.target, &self.norm_up));
+            new_position -= offset * normalize(&cross(&self.target, &self.norm_up));
         }
         if direction.right {
-            self.position += offset * normalize(&cross(&self.target, &self.norm_up));
+            new_position += offset * normalize(&cross(&self.target, &self.norm_up));
         }
         if direction.up {
-            self.position += offset * self.norm_up;
+            new_position += offset * self.norm_up;
         }
         if direction.down {
-            self.position -= offset * self.norm_up;
+            new_position -= offset * self.norm_up;
         }
+
+        new_position
     }
 
     pub fn rotate_camera_by_offsets(&mut self, xoffset: f32, yoffset: f32) {
@@ -157,8 +180,8 @@ impl Player {
         self.target = normalize(&direction);
     }
 
-    pub fn position(&self) -> &Vec3 {
-        &self.position
+    pub fn position(&self) -> Vec3 {
+        self.position
     }
 
     pub fn projection(&self) -> &Mat4 {
@@ -166,10 +189,37 @@ impl Player {
     }
 
     pub fn look_at(&self) -> Mat4 {
-        look_at(&self.position, &(self.position.clone() + self.target), &self.up)
+        look_at(
+            &self.position,
+            &(self.position.clone() + self.target),
+            &self.up,
+        )
     }
 
-    pub fn view_ray(&self) -> &Vec3 {
-        &self.target
+    pub fn view_ray(&self) -> Vec3 {
+        self.target
+    }
+
+    pub fn get_hitbox(&self, blocksize: f32) -> Hitbox {
+        let mut hitbox = self.hitbox.clone();
+        hitbox *= blocksize;
+        hitbox
+    }
+}
+
+#[derive(Clone)]
+pub struct Hitbox {
+    pub data: [Vec3; 8],
+}
+
+impl std::ops::MulAssign<f32> for Hitbox {
+    fn mul_assign(&mut self, rhs: f32) {
+        self.data.iter_mut().for_each(|vec| *vec *= rhs);
+    }
+}
+
+impl std::ops::AddAssign<Vec3> for Hitbox {
+    fn add_assign(&mut self, rhs: Vec3) {
+        self.data.iter_mut().for_each(|vec| *vec += rhs);
     }
 }

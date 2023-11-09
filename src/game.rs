@@ -1,5 +1,8 @@
-use crate::window::Window;
 use sdl2::{event::Event, keyboard::Keycode};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::window::Window;
 
 pub mod player;
 use player::Player;
@@ -12,7 +15,7 @@ pub mod storage;
 use crate::render::aim::Aim;
 
 pub struct Game {
-    player: Player,
+    player: Rc<RefCell<Player>>,
     world: World,
     aim: Aim,
 
@@ -30,9 +33,15 @@ const DEFAULT_BLOCK_SIZE: f32 = 1.;
 impl Game {
     pub fn init(window: &Window) -> Result<Game, String> {
         let aspect_ratio = window.width() as f32 / window.height() as f32;
+        let player = Rc::new(RefCell::new(Player::new(
+            aspect_ratio,
+            45f32,
+            0.1f32,
+            200f32,
+        )));
         Ok(Game {
-            player: Player::new(aspect_ratio, 45f32, 0.1f32, 200f32),
-            world: World::new(DEFAULT_SEED, DEFAULT_BLOCK_SIZE),
+            player: player.clone(),
+            world: World::new(DEFAULT_SEED, DEFAULT_BLOCK_SIZE, player),
             aim: Aim::new(
                 window.width() as f32,
                 window.height() as f32,
@@ -48,12 +57,8 @@ impl Game {
     pub fn handle(&mut self, event: Event) {
         match event {
             Event::MouseButtonDown { mouse_btn, .. } => match mouse_btn {
-                sdl2::mouse::MouseButton::Left => self
-                    .world
-                    .destroy_block_if_possible(self.player.position(), self.player.view_ray()),
-                sdl2::mouse::MouseButton::Right => self
-                    .world
-                    .place_block_if_possible(self.player.position(), self.player.view_ray()),
+                sdl2::mouse::MouseButton::Left => self.world.player_destroy_block_if_possible(),
+                sdl2::mouse::MouseButton::Right => self.world.player_place_block_if_possible(),
                 _ => (),
             },
             Event::KeyDown { keycode, .. } => {
@@ -61,12 +66,12 @@ impl Game {
                     return;
                 }
                 match keycode.unwrap() {
-                    Keycode::W => self.player.move_forward(),
-                    Keycode::A => self.player.move_left(),
-                    Keycode::S => self.player.move_backward(),
-                    Keycode::D => self.player.move_right(),
-                    Keycode::Space => self.player.move_up(),
-                    Keycode::LShift => self.player.move_down(),
+                    Keycode::W => self.player.borrow_mut().move_forward(),
+                    Keycode::A => self.player.borrow_mut().move_left(),
+                    Keycode::S => self.player.borrow_mut().move_backward(),
+                    Keycode::D => self.player.borrow_mut().move_right(),
+                    Keycode::Space => self.player.borrow_mut().move_up(),
+                    Keycode::LShift => self.player.borrow_mut().move_down(),
                     _ => (),
                 }
             }
@@ -75,17 +80,18 @@ impl Game {
                     return;
                 }
                 match keycode.unwrap() {
-                    Keycode::W => self.player.stop_move_forward(),
-                    Keycode::A => self.player.stop_move_left(),
-                    Keycode::S => self.player.stop_move_backward(),
-                    Keycode::D => self.player.stop_move_right(),
-                    Keycode::Space => self.player.stop_move_up(),
-                    Keycode::LShift => self.player.stop_move_down(),
+                    Keycode::W => self.player.borrow_mut().stop_move_forward(),
+                    Keycode::A => self.player.borrow_mut().stop_move_left(),
+                    Keycode::S => self.player.borrow_mut().stop_move_backward(),
+                    Keycode::D => self.player.borrow_mut().stop_move_right(),
+                    Keycode::Space => self.player.borrow_mut().stop_move_up(),
+                    Keycode::LShift => self.player.borrow_mut().stop_move_down(),
                     _ => (),
                 }
             }
             Event::MouseMotion { xrel, yrel, .. } => self
                 .player
+                .borrow_mut()
                 .rotate_camera_by_offsets(xrel as f32, yrel as f32),
             _ => (),
         }
@@ -93,10 +99,9 @@ impl Game {
 
     pub fn update(&mut self) {
         let current = self.timer.ticks();
-        let delta_timer = (current - self.last_frame) as f32 / 1000.0;
+        let delta_time = (current - self.last_frame) as f32 / 1000.0;
 
-        self.player.process_move(delta_timer);
-        self.world.update_player_position(self.player.position());
+        self.world.update(delta_time);
         self.world.update_state();
 
         self.last_frame = current;
@@ -107,7 +112,7 @@ impl Game {
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
         }
 
-        self.world.render(&self.player);
+        self.world.render();
         self.aim.render();
     }
 

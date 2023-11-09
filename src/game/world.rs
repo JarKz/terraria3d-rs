@@ -3,12 +3,17 @@
 pub mod chunk;
 use chunk::Chunk;
 
+use super::player::Player;
+
 use crate::render::block::Block;
 use crate::render::mesh::ChunkMesh;
 use crate::render::{Program, Shader, TextureAtlas, TextureAtlasConfiguration};
 
 use nalgebra_glm::{vec3, Vec3};
+
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::thread::JoinHandle;
 
 use super::storage::STORAGE;
@@ -74,6 +79,7 @@ pub struct World {
     render_center: (isize, isize),
     render_radius_in_chunks: usize,
 
+    player: Rc<RefCell<Player>>,
     player_distance_to_block: usize,
 
     threads: Vec<JoinHandle<()>>,
@@ -84,7 +90,7 @@ pub struct World {
 impl World {
     //TODO:
     //This generation is temporary, need in future change to normal generation!
-    pub fn new(seed: u32, blocksize: f32) -> Self {
+    pub fn new(seed: u32, blocksize: f32, player: Rc<RefCell<Player>>) -> Self {
         #[allow(unused_assignments)]
         let mut render_radius_in_chunks = 8;
         #[cfg(target_os = "macos")]
@@ -98,6 +104,7 @@ impl World {
             render_center: (0, 0),
             render_radius_in_chunks,
 
+            player,
             player_distance_to_block: 4,
 
             threads: vec![],
@@ -116,6 +123,7 @@ impl World {
 
         let offset = blocksize * Chunk::WIDTH as f32;
         Self::init_world(&world, offset);
+        Self::init_player_position(&world);
         world
     }
 
@@ -146,7 +154,41 @@ impl World {
         }
     }
 
-    pub fn destroy_block_if_possible(&mut self, player_position: &Vec3, view_ray: &Vec3) {
+    fn init_player_position(world: &World) {
+        let chunk = STORAGE.lock().chunk(0, 0).unwrap();
+        let chunk = chunk.lock();
+        let blocks = chunk.blocks();
+        let anticipated_surface = 50;
+        macro_rules! stop_at_block_and_set_new_player_pos {
+            (for $y:ident with $blocks:ident, $world:ident) => {
+                if $y != Chunk::HEIGHT
+                    && Block::is_air($blocks[$y][0][0])
+                    && Block::is_air($blocks[$y + 1][0][0])
+                {
+                    let new_position = vec3(
+                        $world.blocksize / 2.0,
+                        ($y + 1) as f32 + $world.blocksize / 2.0,
+                        $world.blocksize / 2.0,
+                    );
+                    $world.player.borrow_mut().process_move(new_position);
+                    break;
+                }
+            };
+        }
+        if Block::is_air(blocks[anticipated_surface][0][0]) {
+            for y in (0..=anticipated_surface).rev() {
+                stop_at_block_and_set_new_player_pos!(for y with blocks, world);
+            }
+        } else {
+            for y in anticipated_surface..Chunk::HEIGHT {
+                stop_at_block_and_set_new_player_pos!(for y with blocks, world);
+            }
+        }
+    }
+
+    pub fn player_destroy_block_if_possible(&mut self) {
+        let player_position = self.player.borrow().position();
+        let view_ray = self.player.borrow().view_ray();
         if let Some(CoordinateInSpace {
             x,
             y,
@@ -154,7 +196,7 @@ impl World {
             xoffset,
             zoffset,
             ..
-        }) = self.find_nearest_block_in_ray(player_position, view_ray)
+        }) = self.find_nearest_block_in_ray(&player_position, &view_ray)
         {
             if let Some(chunk) = STORAGE.lock().chunk(xoffset, zoffset) {
                 let mut chunk = chunk.lock();
@@ -176,7 +218,9 @@ impl World {
         }
     }
 
-    pub fn place_block_if_possible(&mut self, player_position: &Vec3, view_ray: &Vec3) {
+    pub fn player_place_block_if_possible(&mut self) {
+        let player_position = self.player.borrow().position();
+        let view_ray = self.player.borrow().view_ray();
         if let Some(CoordinateInSpace {
             mut x,
             mut y,
@@ -184,7 +228,7 @@ impl World {
             mut xoffset,
             mut zoffset,
             intersection_point,
-        }) = self.find_nearest_block_in_ray(player_position, view_ray)
+        }) = self.find_nearest_block_in_ray(&player_position, &view_ray)
         {
             let block_pos = vec3(
                 x as f32 + (xoffset * Chunk::WIDTH_ISIZE) as f32,
@@ -379,8 +423,32 @@ impl World {
         }
     }
 
-    pub fn update_player_position(&mut self, player_position: &Vec3) {
-        let normalized_ps = player_position * self.blocksize;
+    pub fn update(&mut self, delta_time: f32) {
+        self.update_player_position(delta_time);
+        self.update_mesh_if_needed();
+    }
+
+    fn update_player_position(&self, delta_time: f32) {
+        let mut player = self.player.borrow_mut();
+        let new_position = player.get_new_position(delta_time);
+        if player.position() == new_position {
+            return;
+        }
+
+        let mut hitbox = player.get_hitbox(self.blocksize);
+        for vector in hitbox.data.iter_mut() {
+            *vector = *vector + new_position;
+            vector.iter_mut().for_each(|axis| *axis = axis.floor());
+            if !Block::is_air(WorldHelper::get_block_at(&vector, self.blocksize)) {
+                return;
+            }
+        }
+
+        player.process_move(new_position);
+    }
+
+    fn update_mesh_if_needed(&mut self) {
+        let normalized_ps = self.player.borrow().position() * self.blocksize;
         let xplayer_pos = normalized_ps.x.floor() as isize / Chunk::WIDTH_ISIZE;
         let zplayer_pos = normalized_ps.z.floor() as isize / Chunk::WIDTH_ISIZE;
         if self.render_center.0 == xplayer_pos && self.render_center.1 == zplayer_pos {
@@ -466,10 +534,11 @@ impl World {
         }
     }
 
-    pub fn render(&self, player: &super::player::Player) {
+    pub fn render(&self) {
         self.texture_atlas.set_used();
         self.shader_program.set_used();
 
+        let player = self.player.borrow();
         self.shader_program.insert_mat4(
             &std::ffi::CString::new("projection").unwrap(),
             player.projection(),
@@ -479,7 +548,7 @@ impl World {
 
         self.shader_program.insert_vec3(
             &std::ffi::CString::new("camera_position").unwrap(),
-            player.position(),
+            &player.position(),
         );
         self.shader_program.insert_vec3(
             &std::ffi::CString::new("fog_color").unwrap(),
@@ -508,7 +577,7 @@ impl WorldHelper {
         get_block_position!((x, y, z, xoffset, zoffset) <= xyz_normalized);
 
         if let Some(chunk) = lock!(STORAGE).chunk(xoffset, zoffset) {
-            lock!(chunk).blocks()[y][x as usize][z as usize]
+            lock!(chunk).blocks()[y][x][z]
         } else {
             let offset = Chunk::WIDTH as f32 * blocksize;
             Chunk::anticipated_block_at(x, z, y, xoffset as f32 * offset, zoffset as f32 * offset)
