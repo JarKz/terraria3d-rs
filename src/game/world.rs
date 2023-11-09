@@ -93,8 +93,7 @@ impl World {
     pub fn new(seed: u32, blocksize: f32, player: Rc<RefCell<Player>>) -> Self {
         #[allow(unused_assignments)]
         let mut render_radius_in_chunks = 8;
-        #[cfg(target_os = "macos")]
-        {
+        if cfg!(target_os = "macos") {
             render_radius_in_chunks = 4;
         }
         let world = Self {
@@ -430,17 +429,67 @@ impl World {
 
     fn update_player_position(&self, delta_time: f32) {
         let mut player = self.player.borrow_mut();
-        let new_position = player.get_new_position(delta_time);
+        let mut new_position = player.get_new_position(delta_time);
         if player.position() == new_position {
             return;
         }
 
-        let mut hitbox = player.get_hitbox(self.blocksize);
-        for vector in hitbox.data.iter_mut() {
-            *vector = *vector + new_position;
-            vector.iter_mut().for_each(|axis| *axis = axis.floor());
-            if !Block::is_air(WorldHelper::get_block_at(&vector, self.blocksize)) {
-                return;
+        let hitbox = player.get_hitbox(self.blocksize);
+        for direction in hitbox.data.iter() {
+            let mut new_point = direction + new_position;
+            new_point.iter_mut().for_each(|axis| *axis = axis.floor());
+            get_block_position!((x, y, z, xoffset, zoffset) <= new_point);
+            if let Some(chunk) = STORAGE.lock().chunk(xoffset, zoffset) {
+                let chunk = chunk.lock();
+                if Block::is_air(chunk.block_at(x, z, y)) {
+                    continue;
+                }
+
+                let xblock = x as isize + xoffset * Chunk::WIDTH_ISIZE;
+                let yblock = y as isize;
+                let zblock = z as isize + zoffset * Chunk::WIDTH_ISIZE;
+                let (tmin, _) = self.get_t_values_ray_intersection(
+                    xblock,
+                    yblock,
+                    zblock,
+                    &new_position,
+                    direction,
+                );
+                let intersection_point = new_position + direction * tmin;
+                let diff = (
+                    intersection_point.x - xblock as f32,
+                    intersection_point.y - yblock as f32,
+                    intersection_point.z - zblock as f32,
+                );
+
+                let new_point = direction + new_position;
+                match diff {
+                    (x, _, _) if x == 0.0 => {
+                        let norm = vec3(xblock as f32 - new_point.x, 0.0, 0.0);
+                        new_position += norm;
+                    },
+                    (x, _, _) if x == 1.0 => {
+                        let norm = vec3(1.0 + xblock as f32 - new_point.x, 0.0, 0.0);
+                        new_position += norm;
+                    },
+                    (_, y, _) if y == 0.0 => {
+                        let norm = vec3(0.0, yblock as f32 - new_point.y, 0.0);
+                        new_position += norm;
+                    },
+                    (_, y, _) if y == 1.0 => {
+                        let norm = vec3(0.0, 1.0 + yblock as f32 - new_point.y, 0.0);
+                        new_position += norm;
+                    },
+                    (_, _, z) if z == 0.0 => {
+                        let norm = vec3(0.0, 0.0, zblock as f32 - new_point.z);
+                        new_position += norm;
+                    },
+                    (_, _, z) if z == 1.0 => {
+                        let norm = vec3(0.0, 0.0, 1.0 + zblock as f32 - new_point.z);
+                        new_position += norm;
+                    },
+                    _ => panic!("Intersection point of moving is not right!"),
+                }
             }
         }
 

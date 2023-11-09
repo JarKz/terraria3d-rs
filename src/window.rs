@@ -34,16 +34,17 @@ impl Window {
 
         let window_context = video_subsystem
             .window(title, width, height)
+            // .fullscreen_desktop()
             .opengl()
             .allow_highdpi()
             .build()?;
-
 
         let gl_context = window_context.gl_create_context()?;
         gl::load_with(|s| video_subsystem.gl_get_proc_address(s) as *const gl::types::GLvoid);
 
         sdl.mouse().set_relative_mouse_mode(true);
 
+        let (width, height) = window_context.size();
         unsafe {
             gl::Viewport(0, 0, width as i32, height as i32);
             #[cfg(target_os = "macos")]

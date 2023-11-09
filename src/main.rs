@@ -38,12 +38,9 @@ fn run() {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(target_os = "macos")]
-    {
+    if cfg!(target_os = "macos") {
         run();
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
+    } else {
         std::thread::Builder::new()
             .stack_size(32 * 1024 * 1024)
             .name(String::from("Main"))
