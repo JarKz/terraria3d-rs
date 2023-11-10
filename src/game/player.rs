@@ -43,6 +43,10 @@ impl Player {
             Vec3::new(-0.5, 0.5, -0.5),
             Vec3::new(0.5, 0.5, 0.5),
             Vec3::new(-0.5, 0.5, 0.5),
+            Vec3::new(0.5, -0.5, -0.5),
+            Vec3::new(-0.5, -0.5, -0.5),
+            Vec3::new(0.5, -0.5, 0.5),
+            Vec3::new(-0.5, -0.5, 0.5),
             Vec3::new(0.5, -1.5, -0.5),
             Vec3::new(-0.5, -1.5, -0.5),
             Vec3::new(0.5, -1.5, 0.5),
@@ -209,7 +213,7 @@ impl Player {
 
 #[derive(Clone)]
 pub struct Hitbox {
-    pub data: [Vec3; 8],
+    pub data: [Vec3; 12],
 }
 
 impl std::ops::MulAssign<f32> for Hitbox {
