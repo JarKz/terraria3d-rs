@@ -260,22 +260,25 @@ impl World {
             shift_to_need_axis!(diff, z, zoffset, Chunk::WIDTH);
             shift_to_need_axis!(diff, y, Chunk::HEIGHT);
 
-            // TODO:
-            // Need to define normal collision of player and block
-            //
-            // let dist = vec3(
-            //     ((x as f32 + (xoffset * Chunk::WIDTH_ISIZE) as f32) - player_position.x)
-            //         .abs(),
-            //     (y as f32) - player_position.y.floor(),
-            //     ((z as f32 + (zoffset * Chunk::WIDTH_ISIZE) as f32) - player_position.z)
-            //         .abs(),
-            // );
-            // if (dist.x / self.blocksize < self.blocksize && dist.z / self.blocksize < self.blocksize)
-            //     && ((dist.y < 0.0 && dist.y.abs() / (self.blocksize * 2.0) < 1.0)
-            //         || (dist.y >= 0.0 && dist.y / self.blocksize < 1.0))
-            // {
-            //     return;
-            // }
+            let mut player_hitbox = self.player.borrow().get_hitbox(self.blocksize);
+            for direction in &mut player_hitbox.data {
+                //Need to shift for normal placing block in positive axis
+                if direction.x > 0.0 {
+                    direction.x -= 0.01;
+                }
+                if direction.y > 0.0 {
+                    direction.y -= 0.01;
+                }
+                if direction.z > 0.0 {
+                    direction.z -= 0.01;
+                }
+                let mut collision_point = player_position + *direction;
+                collision_point.iter_mut().for_each(|axis| *axis = axis.floor());
+                get_block_position!((cx, cy, cz, cxoffset, czoffset) <= collision_point);
+                if x == cx && y == cy && z == cz && xoffset == cxoffset && zoffset == czoffset {
+                    return;
+                }
+            }
 
             if let Some(chunk) = STORAGE.lock().chunk(xoffset, zoffset) {
                 let mut chunk = chunk.lock();
@@ -432,74 +435,69 @@ impl World {
             return;
         }
 
-        macro_rules! return_no_normal_position {
-            ($new_position:ident, $direction:ident) => {
-                let mut new_point = $direction + $new_position;
-                new_point.iter_mut().for_each(|axis| *axis = axis.floor());
-                get_block_position!((x, y, z, xoffset, zoffset) <= new_point);
-                if let Some(chunk) = STORAGE.lock().chunk(xoffset, zoffset) {
-                    let chunk = chunk.lock();
-                    if Block::is_air(chunk.block_at(x, z, y)) {
-                        continue;
-                    }
-
-                    let xblock = x as isize + xoffset * Chunk::WIDTH_ISIZE;
-                    let yblock = y as isize;
-                    let zblock = z as isize + zoffset * Chunk::WIDTH_ISIZE;
-                    let (tmin, _) = self.get_t_values_ray_intersection(
-                        xblock,
-                        yblock,
-                        zblock,
-                        &$new_position,
-                        $direction,
-                    );
-                    let intersection_point = $new_position + $direction * tmin;
-                    let diff = (
-                        intersection_point.x - xblock as f32,
-                        intersection_point.y - yblock as f32,
-                        intersection_point.z - zblock as f32,
-                    );
-
-                    let new_point = $direction + $new_position;
-                    match diff {
-                        (x, _, _) if x == 0.0 => {
-                            let norm = vec3(xblock as f32 - new_point.x, 0.0, 0.0);
-                            $new_position += norm;
-                        },
-                        (x, _, _) if x == 1.0 => {
-                            let norm = vec3(1.0 + xblock as f32 - new_point.x, 0.0, 0.0);
-                            $new_position += norm;
-                        },
-                        (_, y, _) if y == 0.0 => {
-                            let norm = vec3(0.0, yblock as f32 - new_point.y, 0.0);
-                            $new_position += norm;
-                        },
-                        (_, y, _) if y == 1.0 => {
-                            let norm = vec3(0.0, 1.0 + yblock as f32 - new_point.y, 0.0);
-                            $new_position += norm;
-                        },
-                        (_, _, z) if z == 0.0 => {
-                            let norm = vec3(0.0, 0.0, zblock as f32 - new_point.z);
-                            $new_position += norm;
-                        },
-                        (_, _, z) if z == 1.0 => {
-                            let norm = vec3(0.0, 0.0, 1.0 + zblock as f32 - new_point.z);
-                            $new_position += norm;
-                        },
-                        _ => panic!("Intersection point of moving is not right!"),
-                    }
-                }
-            }
-        }
-
         let hitbox = player.get_hitbox(self.blocksize);
         for direction in hitbox.data.iter() {
-            //for first possible block
-            return_no_normal_position!(new_position, direction);
-            //for second possible block
-            return_no_normal_position!(new_position, direction);
-            //for third possible block (up or down)
-            return_no_normal_position!(new_position, direction);
+            for _ in 0..3 {
+                let mut new_point = direction + new_position;
+                new_point.iter_mut().for_each(|axis| *axis = axis.floor());
+
+                get_block_position!((x, y, z, xoffset, zoffset) <= new_point);
+
+                let binding_chunk = STORAGE.lock().chunk(xoffset, zoffset).unwrap();
+                let chunk = binding_chunk.lock();
+                if Block::is_air(chunk.block_at(x, z, y)) {
+                    continue;
+                }
+
+                let block = vec3(
+                    x as isize + xoffset * Chunk::WIDTH_ISIZE,
+                    y as isize,
+                    z as isize + zoffset * Chunk::WIDTH_ISIZE,
+                );
+                let (tmin, _) = self.get_t_values_ray_intersection(
+                    block.x,
+                    block.y,
+                    block.z,
+                    &new_position,
+                    direction,
+                );
+                let block = vec3(block.x as f32, block.y as f32, block.z as f32);
+                let intersection_point = new_position + direction * tmin;
+                let diff = (
+                    intersection_point.x - block.x,
+                    intersection_point.y - block.y,
+                    intersection_point.z - block.z,
+                );
+
+                let new_point = direction + new_position;
+                match diff {
+                    (x, _, _) if x == 0.0 => {
+                        let norm = vec3(block.x - new_point.x, 0.0, 0.0);
+                        new_position += norm;
+                    }
+                    (x, _, _) if x == 1.0 => {
+                        let norm = vec3(1.0 + block.x - new_point.x, 0.0, 0.0);
+                        new_position += norm;
+                    }
+                    (_, y, _) if y == 0.0 => {
+                        let norm = vec3(0.0, block.y - new_point.y, 0.0);
+                        new_position += norm;
+                    }
+                    (_, y, _) if y == 1.0 => {
+                        let norm = vec3(0.0, 1.0 + block.y - new_point.y, 0.0);
+                        new_position += norm;
+                    }
+                    (_, _, z) if z == 0.0 => {
+                        let norm = vec3(0.0, 0.0, block.z - new_point.z);
+                        new_position += norm;
+                    }
+                    (_, _, z) if z == 1.0 => {
+                        let norm = vec3(0.0, 0.0, 1.0 + block.z - new_point.z);
+                        new_position += norm;
+                    }
+                    _ => panic!("Intersection point of moving is not right!"),
+                }
+            }
         }
 
         player.process_move(new_position);
