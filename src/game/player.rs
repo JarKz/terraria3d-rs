@@ -1,5 +1,8 @@
 use nalgebra_glm::*;
 
+pub mod inventory;
+use inventory::*;
+
 struct PlayerMove {
     forward: bool,
     backward: bool,
@@ -17,6 +20,8 @@ pub struct Player {
     up: Vec3,
     norm_up: Vec3,
 
+    hitbox: Hitbox,
+
     pitch: f32,
     yaw: f32,
 
@@ -24,16 +29,36 @@ pub struct Player {
     velocity: f32,
 
     move_direction: PlayerMove,
+
+    inventory: Inventory,
+    cell_in_hotbar: usize,
 }
 
 impl Player {
     const DEFAULT_PITCH: f32 = 0.0;
     const DEFAULT_YAW: f32 = -90.0;
-    const DEFAULT_VELOCITY: f32 = 2.5;
+    const DEFAULT_VELOCITY: f32 = 5.;
     const DEFAULT_SENSITIVITY: f32 = 0.1;
 
     const DEFAULT_MAX_UP_ROTATION: f32 = 89.0;
     const DEFAULT_MAX_DOWN_ROTATION: f32 = -89.0;
+
+    const DEFAULT_HITBOX: Hitbox = Hitbox {
+        data: [
+            Vec3::new(0.4, 0.4, -0.4),
+            Vec3::new(-0.4, 0.4, -0.4),
+            Vec3::new(0.4, 0.4, 0.4),
+            Vec3::new(-0.4, 0.4, 0.4),
+            Vec3::new(0.4, -0.5, -0.4),
+            Vec3::new(-0.4, -0.5, -0.4),
+            Vec3::new(0.4, -0.5, 0.4),
+            Vec3::new(-0.4, -0.5, 0.4),
+            Vec3::new(0.4, -1.5, -0.4),
+            Vec3::new(-0.4, -1.5, -0.4),
+            Vec3::new(0.4, -1.5, 0.4),
+            Vec3::new(-0.4, -1.5, 0.4),
+        ],
+    };
 
     pub fn new(aspect: f32, fovy: f32, near: f32, far: f32) -> Self {
         Player {
@@ -41,12 +66,15 @@ impl Player {
             position: vec3(0.0, 0.0, 0.0),
             target: vec3(0.0, 0.0, -1.0),
             up: vec3(0.0, 1.0, 0.0),
+            norm_up: vec3(0.0, 1.0, 0.0),
+
+            hitbox: Self::DEFAULT_HITBOX.clone(),
+
             pitch: Self::DEFAULT_PITCH,
             yaw: Self::DEFAULT_YAW,
             sensitivity: Self::DEFAULT_SENSITIVITY,
             velocity: Self::DEFAULT_VELOCITY,
 
-            norm_up: vec3(0.0, 1.0, 0.0),
             move_direction: PlayerMove {
                 forward: false,
                 backward: false,
@@ -55,6 +83,9 @@ impl Player {
                 up: false,
                 down: false,
             },
+
+            inventory: Inventory::new(),
+            cell_in_hotbar: 0,
         }
     }
 
@@ -64,6 +95,10 @@ impl Player {
 
     pub fn set_velocity(&mut self, new_velocity: f32) {
         self.velocity = new_velocity;
+    }
+
+    pub fn update_vision(&mut self, fovy: f32, near: f32, far: f32) {
+        self.projection = perspective(*crate::window::ASPECT_RATIO.lock(), fovy, near, far);
     }
 
     pub fn move_forward(&mut self) {
@@ -114,27 +149,34 @@ impl Player {
         self.move_direction.down = false;
     }
 
-    pub fn process_move(&mut self, delta_time: f32) {
+    pub fn process_move(&mut self, new_position: Vec3) {
+        self.position = new_position;
+    }
+
+    pub fn get_new_position(&self, delta_time: f32) -> Vec3 {
         let direction = &self.move_direction;
         let offset = delta_time * self.velocity;
+        let mut new_position = self.position.clone();
         if direction.forward {
-            self.position += offset * normalize(&vec3(self.target.x, 0.0, self.target.z));
+            new_position += offset * normalize(&vec3(self.target.x, 0.0, self.target.z));
         }
         if direction.backward {
-            self.position -= offset * normalize(&vec3(self.target.x, 0.0, self.target.z));
+            new_position -= offset * normalize(&vec3(self.target.x, 0.0, self.target.z));
         }
         if direction.left {
-            self.position -= offset * normalize(&cross(&self.target, &self.norm_up));
+            new_position -= offset * normalize(&cross(&self.target, &self.norm_up));
         }
         if direction.right {
-            self.position += offset * normalize(&cross(&self.target, &self.norm_up));
+            new_position += offset * normalize(&cross(&self.target, &self.norm_up));
         }
         if direction.up {
-            self.position += offset * self.norm_up;
+            new_position += offset * self.norm_up;
         }
         if direction.down {
-            self.position -= offset * self.norm_up;
+            new_position -= offset * self.norm_up;
         }
+
+        new_position
     }
 
     pub fn rotate_camera_by_offsets(&mut self, xoffset: f32, yoffset: f32) {
@@ -155,8 +197,8 @@ impl Player {
         self.target = normalize(&direction);
     }
 
-    pub fn position(&self) -> &Vec3 {
-        &self.position
+    pub fn position(&self) -> Vec3 {
+        self.position
     }
 
     pub fn projection(&self) -> &Mat4 {
@@ -164,6 +206,50 @@ impl Player {
     }
 
     pub fn look_at(&self) -> Mat4 {
-        look_at(&self.position, &self.target, &self.up)
+        look_at(
+            &self.position,
+            &(self.position.clone() + self.target),
+            &self.up,
+        )
+    }
+
+    pub fn view_ray(&self) -> Vec3 {
+        self.target
+    }
+
+    pub fn get_hitbox(&self, blocksize: f32) -> Hitbox {
+        let mut hitbox = self.hitbox.clone();
+        hitbox *= blocksize;
+        hitbox
+    }
+
+    pub fn get_block_in_hand(&mut self) -> Option<Item> {
+        self.inventory.get_item_from_hotbar(self.cell_in_hotbar)
+    }
+
+    pub fn pick_block(&mut self, block: u64, total: Count) {
+        self.inventory.pick_item(Item::from_block(block, total));
+    }
+
+    pub fn select_hotbar_cell(&mut self, cell_position: usize) {
+        let cell_position = cell_position.min(HOTBAR_SIZE - 1);
+        self.cell_in_hotbar = cell_position;
+    }
+}
+
+#[derive(Clone)]
+pub struct Hitbox {
+    pub data: [Vec3; 12],
+}
+
+impl std::ops::MulAssign<f32> for Hitbox {
+    fn mul_assign(&mut self, rhs: f32) {
+        self.data.iter_mut().for_each(|vec| *vec *= rhs);
+    }
+}
+
+impl std::ops::AddAssign<Vec3> for Hitbox {
+    fn add_assign(&mut self, rhs: Vec3) {
+        self.data.iter_mut().for_each(|vec| *vec += rhs);
     }
 }

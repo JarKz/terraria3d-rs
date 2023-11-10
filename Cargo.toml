@@ -16,3 +16,12 @@ noise = "0.8.2"
 # for texture atlas
 lodepng = "3.8"
 rgb = "0.8.36"
+
+# Unabling singleton
+once_cell = "1.18.0"
+
+# Unsafe, but safe, multithreading support
+parking_lot = "0.12.1"
+
+[profile.dev]
+opt-level = 1

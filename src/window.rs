@@ -1,13 +1,16 @@
-use sdl2::{EventPump, video::GLContext};
+use sdl2::{video::GLContext, EventPump};
 
 extern crate sdl2;
+
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
+
+pub static ASPECT_RATIO: Lazy<Mutex<f32>> = Lazy::new(|| Mutex::new(1.0));
 
 pub struct Window {
     sdl: sdl2::Sdl,
     window_context: sdl2::video::Window,
     gl_context: sdl2::video::GLContext,
-    width: u32,
-    height: u32,
 }
 
 impl Window {
@@ -34,6 +37,7 @@ impl Window {
 
         let window_context = video_subsystem
             .window(title, width, height)
+            // .fullscreen_desktop()
             .opengl()
             .allow_highdpi()
             .build()?;
@@ -41,7 +45,24 @@ impl Window {
         let gl_context = window_context.gl_create_context()?;
         gl::load_with(|s| video_subsystem.gl_get_proc_address(s) as *const gl::types::GLvoid);
 
-        Ok(Self { sdl, window_context, gl_context, width, height })
+        sdl.mouse().set_relative_mouse_mode(true);
+
+        let (width, height) = window_context.size();
+        *ASPECT_RATIO.lock() = width as f32 / height as f32;
+        unsafe {
+            gl::Viewport(0, 0, width as i32, height as i32);
+            #[cfg(target_os = "macos")]
+            {
+                gl::Viewport(0, 0, width as i32 * 2, height as i32 * 2);
+            }
+            gl::ClearColor(0.3, 0.3, 0.5, 1.0);
+            gl::Enable(gl::DEPTH_TEST);
+        }
+        Ok(Self {
+            sdl,
+            window_context,
+            gl_context,
+        })
     }
 
     pub fn event_pump(&self) -> Result<EventPump, String> {
@@ -49,11 +70,11 @@ impl Window {
     }
 
     pub fn width(&self) -> u32 {
-        self.width
+        self.window_context.size().0
     }
 
     pub fn height(&self) -> u32 {
-        self.height
+        self.window_context.size().1
     }
 
     pub fn gl_context(&self) -> &GLContext {
