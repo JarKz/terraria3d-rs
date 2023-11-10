@@ -1,17 +1,22 @@
-const BLOCKS: [Block; 2] = [
+const BLOCKS: [Block; 3] = [
     Block {
         name: BlockType::AIR,
         texutre_offset: 0,
     },
     Block {
-        name: BlockType::DIRT,
+        name: BlockType::STONE,
         texutre_offset: 0,
+    },
+    Block {
+        name: BlockType::DIRT,
+        texutre_offset: 1,
     },
 ];
 
 #[derive(Clone, Copy)]
 pub enum BlockType {
     AIR,
+    STONE,
     DIRT,
 }
 

@@ -1,5 +1,8 @@
 use nalgebra_glm::*;
 
+pub mod inventory;
+use inventory::*;
+
 struct PlayerMove {
     forward: bool,
     backward: bool,
@@ -26,6 +29,9 @@ pub struct Player {
     velocity: f32,
 
     move_direction: PlayerMove,
+
+    inventory: Inventory,
+    cell_in_hotbar: usize,
 }
 
 impl Player {
@@ -77,6 +83,9 @@ impl Player {
                 up: false,
                 down: false,
             },
+
+            inventory: Inventory::new(),
+            cell_in_hotbar: 0,
         }
     }
 
@@ -86,6 +95,10 @@ impl Player {
 
     pub fn set_velocity(&mut self, new_velocity: f32) {
         self.velocity = new_velocity;
+    }
+
+    pub fn update_vision(&mut self, fovy: f32, near: f32, far: f32) {
+        self.projection = perspective(*crate::window::ASPECT_RATIO.lock(), fovy, near, far);
     }
 
     pub fn move_forward(&mut self) {
@@ -208,6 +221,19 @@ impl Player {
         let mut hitbox = self.hitbox.clone();
         hitbox *= blocksize;
         hitbox
+    }
+
+    pub fn get_block_in_hand(&mut self) -> Option<Item> {
+        self.inventory.get_item_from_hotbar(self.cell_in_hotbar)
+    }
+
+    pub fn pick_block(&mut self, block: u64, total: Count) {
+        self.inventory.pick_item(Item::from_block(block, total));
+    }
+
+    pub fn select_hotbar_cell(&mut self, cell_position: usize) {
+        let cell_position = cell_position.min(HOTBAR_SIZE - 1);
+        self.cell_in_hotbar = cell_position;
     }
 }
 

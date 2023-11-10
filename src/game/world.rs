@@ -121,6 +121,7 @@ impl World {
         let offset = blocksize * Chunk::WIDTH as f32;
         Self::init_world(&world, offset);
         Self::init_player_position(&world);
+        Self::update_player_vision(&world);
         world
     }
 
@@ -183,6 +184,15 @@ impl World {
         }
     }
 
+    pub fn update_player_vision(world: &World) {
+        let mut player = world.player.borrow_mut();
+        player.update_vision(
+            45.0,
+            0.01,
+            (world.render_radius_in_chunks * Chunk::WIDTH - 1) as f32,
+        )
+    }
+
     pub fn player_destroy_block_if_possible(&mut self) {
         let player_position = self.player.borrow().position();
         let view_ray = self.player.borrow().view_ray();
@@ -216,6 +226,11 @@ impl World {
     }
 
     pub fn player_place_block_if_possible(&mut self) {
+        let block_to_update = match self.player.borrow_mut().get_block_in_hand() {
+            Some(item) => item.id(),
+            None => return,
+        };
+
         let player_position = self.player.borrow().position();
         let view_ray = self.player.borrow().view_ray();
         if let Some(CoordinateInSpace {
@@ -273,7 +288,9 @@ impl World {
                     direction.z -= 0.01;
                 }
                 let mut collision_point = player_position + *direction;
-                collision_point.iter_mut().for_each(|axis| *axis = axis.floor());
+                collision_point
+                    .iter_mut()
+                    .for_each(|axis| *axis = axis.floor());
                 get_block_position!((cx, cy, cz, cxoffset, czoffset) <= collision_point);
                 if x == cx && y == cy && z == cz && xoffset == cxoffset && zoffset == czoffset {
                     return;
@@ -288,7 +305,7 @@ impl World {
                     return;
                 }
 
-                *block = 1;
+                *block = block_to_update;
                 lock!(STORAGE).update_mesh(
                     xoffset,
                     zoffset,
@@ -611,10 +628,14 @@ impl World {
             &vec3(0.3, 0.3, 0.5),
         );
 
-        self.shader_program
-            .insert_float(&std::ffi::CString::new("fog_min_dist").unwrap(), 35.);
-        self.shader_program
-            .insert_float(&std::ffi::CString::new("fog_max_dist").unwrap(), 40.);
+        self.shader_program.insert_float(
+            &std::ffi::CString::new("fog_min_dist").unwrap(),
+            (self.render_radius_in_chunks * Chunk::WIDTH - 2) as f32,
+        );
+        self.shader_program.insert_float(
+            &std::ffi::CString::new("fog_max_dist").unwrap(),
+            (self.render_radius_in_chunks * Chunk::WIDTH) as f32,
+        );
 
         for mesh in STORAGE.lock().all_mesh().clone().values() {
             mesh.render(&self.shader_program);

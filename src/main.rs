@@ -30,8 +30,7 @@ fn run() {
 
         game.update();
         game.render();
-        game.fps();
-        // println!("Current FPS: {}", game.fps());
+        println!("Current FPS: {}", game.fps());
 
         window.update();
     }

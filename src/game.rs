@@ -27,14 +27,13 @@ pub struct Game {
 
 //TODO:
 //This is temporary values, need to change to methods from other structs!
-const DEFAULT_SEED: u32 = 2;
+const DEFAULT_SEED: u32 = 5;
 const DEFAULT_BLOCK_SIZE: f32 = 1.;
 
 impl Game {
     pub fn init(window: &Window) -> Result<Game, String> {
-        let aspect_ratio = window.width() as f32 / window.height() as f32;
         let player = Rc::new(RefCell::new(Player::new(
-            aspect_ratio,
+            *super::window::ASPECT_RATIO.lock(),
             45f32,
             0.1f32,
             200f32,
@@ -72,6 +71,16 @@ impl Game {
                     Keycode::D => self.player.borrow_mut().move_right(),
                     Keycode::Space => self.player.borrow_mut().move_up(),
                     Keycode::LShift => self.player.borrow_mut().move_down(),
+                    Keycode::Num1 => self.player.borrow_mut().select_hotbar_cell(0),
+                    Keycode::Num2 => self.player.borrow_mut().select_hotbar_cell(1),
+                    Keycode::Num3 => self.player.borrow_mut().select_hotbar_cell(2),
+                    Keycode::Num4 => self.player.borrow_mut().select_hotbar_cell(3),
+                    Keycode::Num5 => self.player.borrow_mut().select_hotbar_cell(4),
+                    Keycode::Num6 => self.player.borrow_mut().select_hotbar_cell(5),
+                    Keycode::Num7 => self.player.borrow_mut().select_hotbar_cell(6),
+                    Keycode::Num8 => self.player.borrow_mut().select_hotbar_cell(7),
+                    Keycode::Num9 => self.player.borrow_mut().select_hotbar_cell(8),
+                    Keycode::Num0 => self.player.borrow_mut().select_hotbar_cell(9),
                     _ => (),
                 }
             }
@@ -126,9 +135,8 @@ impl Game {
         let elapsed = (self.timer.performance_counter() - self.start_performance_counter) as f32
             / self.timer.performance_frequency() as f32
             * 1000.0;
-        //TODO: Fix. Need to show normal FPS
         let normalized_fps = (Self::FPS60 - elapsed).floor();
         self.timer.delay(normalized_fps as u32);
-        1000f32 / normalized_fps
+        1000f32 / elapsed
     }
 }

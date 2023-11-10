@@ -113,6 +113,10 @@ impl ChunkMesh {
         for block_mesh in &self.mesh {
             shader_program
                 .insert_mat4(&std::ffi::CString::new("model").unwrap(), &block_mesh.model);
+            shader_program.insert_float(
+                &std::ffi::CString::new("texture_offset").unwrap(),
+                block_mesh.zoffset_texture,
+            );
             for face in &block_mesh.data {
                 BLOCK_RENDERER.render(*face);
             }
@@ -144,9 +148,9 @@ impl BlockMesh {
     fn get_block_id(block: u64) -> usize {
         let mut bit = 1;
         let mut result = 0;
-        for _ in 0..=16 {
-            if bit & block == 1 {
-                result = result | bit;
+        for _ in 0..16 {
+            if bit & block == bit {
+                result |= bit;
             }
             bit <<= 1;
         }
